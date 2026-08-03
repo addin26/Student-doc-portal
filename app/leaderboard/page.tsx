@@ -64,7 +64,7 @@ export default function LeaderboardPage() {
   return (
     <div className="mx-auto max-w-5xl px-4 py-8">
       <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }} className="text-center">
-        <div className="inline-flex items-center gap-2 rounded-full bg-amber-50 px-4 py-1.5 text-sm font-medium text-amber-600 dark:bg-amber-500/10"><Trophy className="h-4 w-4" />All-time leaderboard</div>
+        <div className="inline-flex items-center gap-2 rounded-full bg-amber-50 px-4 py-1.5 text-sm font-medium text-amber-700 dark:bg-amber-500/10 dark:text-amber-300"><Trophy className="h-4 w-4" />All-time leaderboard</div>
         <h1 className="mt-4 font-display text-3xl font-bold tracking-tight md:text-4xl">Top Contributors</h1>
         <p className="mt-2 text-muted-foreground">Live contribution totals for {total} StudyDock community members.</p>
       </motion.div>

@@ -87,7 +87,7 @@ export function Navbar() {
                 className={cn(
                   'relative rounded-lg px-3.5 py-2 text-sm font-medium transition-colors',
                   pathname === link.href || pathname.startsWith(link.href + '/')
-                    ? 'text-primary'
+                    ? 'text-blue-700 dark:text-blue-300'
                     : 'text-muted-foreground hover:text-foreground'
                 )}
               >
@@ -95,7 +95,7 @@ export function Navbar() {
                 {(pathname === link.href || pathname.startsWith(link.href + '/')) && (
                   <motion.div
                     layoutId="nav-active"
-                    className="absolute inset-0 -z-10 rounded-lg bg-primary/10"
+                    className="absolute inset-0 -z-10 rounded-lg bg-blue-100 dark:bg-blue-950/50"
                     transition={{ type: 'spring', stiffness: 400, damping: 30 }}
                   />
                 )}

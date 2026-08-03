@@ -2,10 +2,10 @@
 
 | Field | Value |
 | --- | --- |
-| Plan version | 3.1 |
+| Plan version | 3.2 |
 | Last updated | August 3, 2026 |
 | Applies to | `STUDYDOCK/`, `STUDYDOCK-ADMIN/`, shared Supabase project |
-| Source of requirements | `srs_document.md` version 3.1 |
+| Source of requirements | `srs_document.md` version 3.2 |
 | Delivery approach | Security-first, incremental, migration-driven |
 
 ## 1. Objective
@@ -37,12 +37,12 @@ Implemented in the current working tree:
 - Asynchronous PDF worker with bounded source size/page count, service-role-only claim/complete/fail RPCs, stale-lock recovery, retries, and validated Gemini output.
 - Truthful private notes: owner CRUD, autosave states, temporary recording disclosure, browser speech-to-text capability handling, and authenticated note summaries.
 - True server-side resource not-found responses and a policy-disabled, bounded delayed account-erasure worker.
-- Node 20 CI plus Playwright auth, accessibility, and desktop/mobile visual-baseline checks.
+- Node 20 CI plus full-history Gitleaks, dependency audit, Playwright accessibility checks, and desktop/mobile visual baselines for auth, home, explore, universities, and leaderboard.
 
 Remaining release evidence/gaps:
 
 - The new migrations have not been applied because this workstation has no approved Supabase migration/service-role credential.
-- Staging RLS, RPC, upgrade, R2 partial-failure, credential-backed E2E, remaining-page visual/accessibility, and representative performance tests are still required. Public auth browser/accessibility/visual checks pass locally.
+- Staging RLS, RPC, upgrade, R2 partial-failure, credential-backed upload/dashboard/notes E2E, manual accessibility, and representative performance tests are still required. The local Public suite passes 17 unit/contract tests and 15 browser checks.
 - Persistent note audio/OCR remain outside release-one scope pending policy decisions.
 
 ### 2.2 Admin App - `STUDYDOCK-ADMIN/`
@@ -58,7 +58,7 @@ Implemented in the current working tree:
 - Email/password login, PKCE callback, SSR session refresh, protected server layout, active-admin checks, forbidden page, safe return path, identity display, and sign-out.
 - Live dashboard with moderation/AI/cleanup metrics and recent audit activity.
 - Audited university/course edit, approval, dependency-safe rejection, collision-aware merge preflight/execute, search, and bounded lists.
-- Resource moderation, forced-download review, feature/removal actions, permanent R2-plus-database deletion, and retryable cleanup operations.
+- Resource moderation with status/type/uploader/university/course filters, forced-download review, feature/removal actions, permanent R2-plus-database deletion, and retryable cleanup operations.
 - Privacy-safe paginated user search, role/status changes, confirmation, audit references, and last-active-admin protection.
 - Typed-confirmation logical account deletion with a 30-day recovery hold, reactivation, and erasure-job visibility.
 - Server-side search/filter/pagination for universities, courses, resources, and users, with bounded server-side merge-target lookup.
@@ -73,10 +73,11 @@ Remaining release evidence/gaps:
 
 ### 2.3 Database
 
-Two additive corrective migrations are now authored:
+Three additive corrective migrations are now authored:
 
 - `20260803120000_secure_rbac_and_rpc.sql` establishes corrected RBAC/RPC foundations.
 - `20260803130000_resource_lifecycle_and_search_v2.sql` adds normalized catalog ownership, moderation/account/AI state, audit/cleanup/delayed-erasure jobs, privacy-safe grants, combined account/IP rate limits, transactional finalization, ranked search, merge preflight/execute, admin/user functions, permanent deletion, and service-role workers.
+- `20260803140000_private_data_account_state.sql` preserves the prior migration checksum while tightening private owner reads and resource mutations for active, suspended, and deleted accounts.
 
 They remain **authored, not deployed**. Completion requires a fresh-database test and an upgrade test against a staging copy. The migration deliberately aborts on legacy normalized duplicates rather than guessing which records to merge; operators must resolve reported duplicates and rerun.
 
@@ -202,7 +203,7 @@ Status values in this plan are **Existing**, **Partial**, and **Not started**. T
 | Confirm hosting provider and runtime for both apps | Partial | Vercel/Node 20 deployment setup is documented for both apps; projects, domains, and background-job approach remain to be configured |
 | Define content/moderation policy and uploader attestation | Not started | Approved policy linked from upload and admin UI |
 | Decide supported extraction formats and audio retention | Not started | Architecture decision records (ADRs) |
-| Capture clean baseline builds and current test failures | Partial | Both production builds, typechecks, and initial safe-redirect unit tests pass; auth/RLS/provider E2E and load/accessibility baselines remain |
+| Capture clean baseline builds and current test failures | Partial | Both production builds/typechecks pass; the Public App has auth plus four public-page accessibility and desktop/mobile visual baselines, while credential-backed/RLS/load/manual-accessibility evidence remains |
 | Add `.env.example` files without secrets | Existing | Public and Admin templates exist; local files are ignored |
 | Provision and verify migration access for a staging Supabase project | Not started | Installed/authenticated CLI or approved CI migration identity plus linked project |
 | Provision R2 staging credentials, private bucket, and CORS policy | Partial | Local S3 credentials configured and app build passes; endpoint TLS, bucket existence/access, CORS, and object smoke test remain |
@@ -409,7 +410,7 @@ Add a dry-run/preflight RPC returning affected counts and conflicts. The UI must
 
 **Goal:** Remove production dependence on `lib/data.ts` for resource and community content.
 
-**Current status:** Application integration complete/pending staging verification. Production pages no longer import fixture catalog data, and all list/search calls are bounded. Gate P3 still requires deployed RLS/search functions, browser not-found checks, representative query plans, and visual/accessibility regression evidence.
+**Current status:** Application integration complete/pending staging verification. Production pages no longer import fixture catalog data, and all list/search calls are bounded. Auth, home, explore, universities, and leaderboard now have desktop/mobile visual baselines and automated serious/critical accessibility checks. Gate P3 still requires deployed RLS/search functions, credential-backed not-found checks, representative query plans, and manual accessibility evidence.
 
 #### 3.1 Search API/RPC v2
 
@@ -513,7 +514,7 @@ Update `app/upload/page.tsx` to:
 
 **Goal:** Make the existing notes experience truthful, private, and persistent.
 
-**Current status:** Release-one behavior implemented/pending RLS/browser E2E. Recordings are intentionally session-only, live transcription is capability-detected, and note summaries use the authenticated Gemini adapter. Persistent audio is not promised and remains deferred until retention policy approval.
+**Current status:** Release-one behavior implemented/pending RLS/browser E2E. Owner CRUD/autosave, visible failures, suspended-account read-only behavior, and active/suspended/deleted private-read migration policy are present. Recordings are intentionally session-only, live transcription is capability-detected, and note summaries use the authenticated Gemini adapter. Persistent audio is not promised and remains deferred until retention policy approval.
 
 #### 5.1 Notes correctness
 
@@ -544,7 +545,7 @@ Replace the timer-based simulated summary with the authenticated AI adapter, or 
 
 **Goal:** Deliver usable, audited curation and moderation after backend security is proven.
 
-**Current status:** Workflow code complete/pending deployed authorization verification. Dashboard, proposals, server-paginated lists, merge, moderation, review download, permanent deletion, cleanup/AI/erasure operations, users, roles, account states, and logical deletion/recovery are present. Gate P6 still requires non-admin negative tests, R2/erasure failure injection, audit inspection, and confirmation that all migrations are active.
+**Current status:** Workflow code complete/pending deployed authorization verification. Dashboard, proposals, server-paginated lists, bounded university/course lookups, resource filters for status/type/uploader/university/course, merge, moderation, review download, permanent deletion, cleanup/AI/erasure operations, users, roles, account states, and logical deletion/recovery are present. Gate P6 still requires non-admin negative tests, R2/erasure failure injection, audit inspection, and confirmation that all migrations are active.
 
 #### 6.1 Dashboard and navigation
 
@@ -580,7 +581,7 @@ Replace the timer-based simulated summary with the authenticated AI adapter, or 
 
 **Goal:** Verify the platform as one ecosystem and establish safe deployment operations.
 
-**Current status:** Both repositories now contain Node 20 GitHub CI for lockfile installation, lint, typecheck, unit/static-contract tests, production build, dependency audit, and Playwright. Local auth/login accessibility and desktop/mobile visual checks pass, and the Admin CSS failure is regression-covered. Real database/RLS tests, credential-backed staging journeys, broader accessibility/performance/restore tests, production observability, rotated secrets, and launch approval remain open.
+**Current status:** Both repositories now contain Node 20 GitHub CI for lockfile installation, full-history Gitleaks scanning, lint, typecheck, unit/static-contract tests, production build, dependency audit, and Playwright. The Public App locally passes 17 unit/contract tests and 15 browser checks across auth and the four main public catalog pages; Admin login accessibility and desktop/mobile visual checks pass, and the Admin CSS failure is regression-covered. Real database/RLS tests, credential-backed staging journeys, manual accessibility/performance/restore tests, production observability, rotated secrets, and launch approval remain open.
 
 #### 7.1 Automated quality gates
 

@@ -34,8 +34,15 @@ function AuthForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const nextPath = getSafeRedirectPath(searchParams.get('next'), '/dashboard');
-  const callbackError = searchParams.get('error');
-  const callbackNotice = searchParams.get('message');
+  const callbackErrorValue = searchParams.get('error');
+  const callbackError = callbackErrorValue === 'account_unavailable'
+    ? 'This account is unavailable. Contact support if you believe this is an error.'
+    : callbackErrorValue === 'The authentication link is invalid or has expired. Please try again.'
+      ? callbackErrorValue
+      : '';
+  const callbackNotice = searchParams.get('message') === 'Password updated. Sign in with your new password.'
+    ? 'Password updated. Sign in with your new password.'
+    : '';
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();

@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { Sparkles, Github, Twitter, Linkedin } from 'lucide-react';
+import { Sparkles, Github } from 'lucide-react';
 
 const footerLinks = {
   Product: [
@@ -12,21 +12,21 @@ const footerLinks = {
   ],
   Community: [
     { label: 'Upload', href: '/upload' },
-    { label: 'Guidelines', href: '#' },
+    { label: 'Guidelines', href: '/platform-info#guidelines' },
     { label: 'Contributors', href: '/leaderboard' },
-    { label: 'Help Center', href: '#' },
+    { label: 'Help Center', href: '/platform-info#help' },
   ],
   Company: [
-    { label: 'About', href: '#' },
-    { label: 'Blog', href: '#' },
-    { label: 'Careers', href: '#' },
-    { label: 'Contact', href: '#' },
+    { label: 'About', href: '/platform-info#about' },
+    { label: 'Blog', href: '/platform-info#updates' },
+    { label: 'Careers', href: '/platform-info#careers' },
+    { label: 'Contact', href: '/platform-info#contact' },
   ],
   Legal: [
-    { label: 'Privacy', href: '#' },
-    { label: 'Terms', href: '#' },
-    { label: 'Copyright', href: '#' },
-    { label: 'DMCA', href: '#' },
+    { label: 'Privacy', href: '/platform-info#privacy' },
+    { label: 'Terms', href: '/platform-info#terms' },
+    { label: 'Copyright', href: '/platform-info#copyright' },
+    { label: 'DMCA', href: '/platform-info#dmca' },
   ],
 };
 
@@ -45,18 +45,18 @@ export function Footer() {
               </span>
             </Link>
             <p className="mt-4 max-w-xs text-sm text-muted-foreground">
-              The largest academic resource-sharing community. Find, share &
-              learn together with students worldwide.
+              A student-focused academic resource-sharing community. Find,
+              share and learn together.
             </p>
             <div className="mt-5 flex gap-2">
               {[
-                { Icon: Github, label: 'StudyDock on GitHub' },
-                { Icon: Twitter, label: 'StudyDock on X' },
-                { Icon: Linkedin, label: 'StudyDock on LinkedIn' },
-              ].map(({ Icon, label }) => (
+                { Icon: Github, label: 'StudyDock on GitHub', href: 'https://github.com/addin26/Student-doc-portal' },
+              ].map(({ Icon, label, href }) => (
                 <Link
                   key={label}
-                  href="#"
+                  href={href}
+                  target="_blank"
+                  rel="noreferrer"
                   aria-label={label}
                   className="flex h-9 w-9 items-center justify-center rounded-xl border border-border bg-card text-muted-foreground transition-all hover:border-primary/40 hover:text-primary"
                 >

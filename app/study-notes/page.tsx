@@ -63,7 +63,9 @@ declare global {
 export default function StudyNotesPage() {
   const router = useRouter();
   const [authChecked, setAuthChecked] = useState(false);
+  const [accountStatus, setAccountStatus] = useState<'checking' | 'active' | 'suspended'>('checking');
   const [loading, setLoading] = useState(true);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [notes, setNotes] = useState<Note[]>([]);
   const [activeNoteId, setActiveNoteId] = useState<string | null>(null);
   const [isRecording, setIsRecording] = useState(false);
@@ -92,6 +94,7 @@ export default function StudyNotesPage() {
   const autosaveNoteId = activeNote?.id;
   const autosaveTitle = activeNote?.title;
   const autosaveContent = activeNote?.content;
+  const readOnly = accountStatus !== 'active';
 
   // Auth gate + initial load
   useEffect(() => {
@@ -101,6 +104,20 @@ export default function StudyNotesPage() {
         router.push('/auth');
         return;
       }
+      const { data: status, error: statusError } = await supabase.rpc('get_my_account_status');
+      if (statusError || !['active', 'suspended', 'deleted'].includes(String(status))) {
+        setNoteError('Your account status could not be verified. Note changes are disabled until you retry.');
+        setLoadFailed(true);
+        setLoading(false);
+        setAuthChecked(true);
+        return;
+      }
+      if (status === 'deleted') {
+        await supabase.auth.signOut();
+        router.replace('/auth?error=account_unavailable');
+        return;
+      }
+      setAccountStatus(status as 'active' | 'suspended');
       setAuthChecked(true);
       await loadNotes();
     })();
@@ -108,13 +125,16 @@ export default function StudyNotesPage() {
 
   const loadNotes = async () => {
     setLoading(true);
+    setLoadFailed(false);
+    setNoteError('');
     const { data, error } = await supabase
       .from('study_notes')
       .select('id, title, content, has_recording, recording_duration, summary, created_at, updated_at')
       .order('updated_at', { ascending: false });
 
     if (error) {
-      console.error('Failed to load notes:', error.message);
+      setNoteError('Your notes could not be loaded. Check your connection and retry.');
+      setLoadFailed(true);
       setLoading(false);
       return;
     }
@@ -142,7 +162,7 @@ export default function StudyNotesPage() {
   };
 
   useEffect(() => {
-    if (!authChecked || loading || !autosaveNoteId) return;
+    if (!authChecked || loading || readOnly || !autosaveNoteId) return;
     const timer = window.setTimeout(async () => {
       setSaving(true);
       setSaved(false);
@@ -159,9 +179,14 @@ export default function StudyNotesPage() {
       }
     }, 900);
     return () => window.clearTimeout(timer);
-  }, [authChecked, autosaveContent, autosaveNoteId, autosaveTitle, loading]);
+  }, [authChecked, autosaveContent, autosaveNoteId, autosaveTitle, loading, readOnly]);
 
   const createNote = async () => {
+    if (readOnly) {
+      setNoteError('This account is read-only while suspended. New notes cannot be created.');
+      return;
+    }
+    setNoteError('');
     const { data, error } = await supabase
       .from('study_notes')
       .insert({ title: 'Untitled note', content: '' })
@@ -169,7 +194,7 @@ export default function StudyNotesPage() {
       .maybeSingle();
 
     if (error || !data) {
-      alert('Could not create note. Please try again.');
+      setNoteError('Could not create a note. Please try again.');
       return;
     }
 
@@ -185,11 +210,15 @@ export default function StudyNotesPage() {
   };
 
   const deleteNote = async (id: string) => {
+    if (readOnly) {
+      setNoteError('This account is read-only while suspended. Notes cannot be deleted.');
+      return;
+    }
     const note = notes.find((item) => item.id === id);
     if (!window.confirm(`Delete “${note?.title || 'Untitled note'}”? This cannot be undone.`)) return;
     const { error } = await supabase.from('study_notes').delete().eq('id', id);
     if (error) {
-      alert('Could not delete note. Please try again.');
+      setNoteError('Could not delete the note. Please try again.');
       return;
     }
     setNotes((prev) => {
@@ -207,6 +236,10 @@ export default function StudyNotesPage() {
 
   const handleSave = async () => {
     if (!activeNote) return;
+    if (readOnly) {
+      setNoteError('This account is read-only while suspended. Note changes cannot be saved.');
+      return;
+    }
     setSaving(true);
     setNoteError('');
     const { error } = await supabase
@@ -236,6 +269,10 @@ export default function StudyNotesPage() {
   // Recording
   const startRecording = useCallback(async () => {
     if (!activeNoteId) return;
+    if (readOnly) {
+      setNoteError('Recording is unavailable while this account is suspended.');
+      return;
+    }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
@@ -270,9 +307,9 @@ export default function StudyNotesPage() {
         setRecordingTime(recordingSecondsRef.current);
       }, 1000);
     } catch {
-      alert('Could not access microphone. Please allow microphone permissions and try again.');
+      setNoteError('Could not access the microphone. Allow microphone permission and try again.');
     }
-  }, [activeNoteId]);
+  }, [activeNoteId, readOnly]);
 
   const stopRecording = useCallback(() => {
     mediaRecorderRef.current?.stop();
@@ -299,6 +336,10 @@ export default function StudyNotesPage() {
 
   const startTranscription = () => {
     if (!activeNoteId) return;
+    if (readOnly) {
+      setNoteError('Transcription is unavailable while this account is suspended.');
+      return;
+    }
     const Recognition = window.SpeechRecognition ?? window.webkitSpeechRecognition;
     if (!Recognition) {
       setNoteError('Live transcription is not supported in this browser. You can continue typing notes manually.');
@@ -347,8 +388,12 @@ export default function StudyNotesPage() {
 
   // Summarize
   const handleSummarize = async () => {
+    if (readOnly) {
+      setNoteError('AI requests are unavailable while this account is suspended.');
+      return;
+    }
     if (!activeNote?.content.trim()) {
-      alert('Add some notes or record your lecture first, then try summarizing.');
+      setNoteError('Add some note content before requesting a summary.');
       return;
     }
     setSummarizing(true);
@@ -425,6 +470,9 @@ export default function StudyNotesPage() {
           </div>
         </motion.div>
 
+        {accountStatus === 'suspended' && <div className="mt-6 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-800" role="status">This account is suspended. Existing notes are available read-only while appeal or export is handled.</div>}
+        {noteError && <div className="mt-6 rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive" role="alert"><span>{noteError}</span>{loadFailed && <Button type="button" variant="outline" size="sm" onClick={() => accountStatus === 'checking' ? window.location.reload() : void loadNotes()} className="ml-3 rounded-xl">Retry</Button>}</div>}
+
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -438,13 +486,7 @@ export default function StudyNotesPage() {
           <p className="mt-2 max-w-sm text-sm text-muted-foreground">
             Create your first note to start taking notes, recording lectures, and generating summaries.
           </p>
-          <Button
-            onClick={createNote}
-            className="mt-6 rounded-2xl bg-gradient-to-r from-primary to-secondary shadow-glow"
-          >
-            <Plus className="mr-2 h-4 w-4" />
-            Create your first note
-          </Button>
+          {!readOnly && <Button onClick={createNote} className="mt-6 rounded-2xl bg-gradient-to-r from-primary to-secondary shadow-glow"><Plus className="mr-2 h-4 w-4" />Create your first note</Button>}
         </motion.div>
       </div>
     );
@@ -464,6 +506,8 @@ export default function StudyNotesPage() {
         </div>
       </motion.div>
 
+      {accountStatus === 'suspended' && <div className="mt-6 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-800" role="status">This account is suspended. Existing notes are available read-only while appeal or export is handled.</div>}
+
       {noteError && (
         <div className="mt-6 rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive" role="alert">
           {noteError}
@@ -478,7 +522,7 @@ export default function StudyNotesPage() {
         <div className="mt-8 grid gap-6 lg:grid-cols-[280px_1fr]">
           {/* sidebar — note list */}
           <motion.div initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.5, delay: 0.1 }} className="space-y-3">
-            <Button onClick={createNote} className="h-11 w-full justify-start rounded-2xl bg-gradient-to-r from-primary to-secondary shadow-glow">
+            <Button onClick={createNote} disabled={readOnly} className="h-11 w-full justify-start rounded-2xl bg-gradient-to-r from-primary to-secondary shadow-glow">
               <Plus className="mr-2 h-4.5 w-4.5" />
               New note
             </Button>
@@ -533,12 +577,12 @@ export default function StudyNotesPage() {
                     Notepad
                   </div>
                   <div className="flex items-center gap-2">
-                    <button onClick={() => deleteNote(activeNote.id)} className="rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive" aria-label="Delete note">
+                    <button onClick={() => deleteNote(activeNote.id)} disabled={readOnly} className="rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:cursor-not-allowed disabled:opacity-40" aria-label="Delete note">
                       <Trash2 className="h-4 w-4" />
                     </button>
                     <button
                       onClick={handleSave}
-                      disabled={saving}
+                      disabled={saving || readOnly}
                       className={cn(
                         'inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-all',
                         saved ? 'bg-success/10 text-success' : 'bg-primary/10 text-primary hover:bg-primary/20'
@@ -553,14 +597,16 @@ export default function StudyNotesPage() {
                   <input
                     value={activeNote.title}
                     onChange={(e) => updateNoteLocal(activeNote.id, { title: e.target.value })}
+                    readOnly={readOnly}
                     placeholder="Note title..."
-                    className="w-full bg-transparent font-display text-lg font-semibold outline-none placeholder:text-muted-foreground/50"
+                    className="w-full bg-transparent font-display text-lg font-semibold outline-none placeholder:text-muted-foreground"
                   />
                   <textarea
                     value={activeNote.content}
                     onChange={(e) => updateNoteLocal(activeNote.id, { content: e.target.value })}
+                    readOnly={readOnly}
                     placeholder="Start taking notes..."
-                    className="mt-3 h-64 w-full resize-none bg-transparent text-sm leading-relaxed outline-none placeholder:text-muted-foreground/50"
+                    className="mt-3 h-64 w-full resize-none bg-transparent text-sm leading-relaxed outline-none placeholder:text-muted-foreground"
                   />
                 </div>
               </div>
@@ -574,8 +620,10 @@ export default function StudyNotesPage() {
                 <div className="flex flex-col items-center gap-5 p-8">
                   <button
                     onClick={isRecording ? stopRecording : startRecording}
+                    disabled={readOnly}
+                    aria-label={isRecording ? 'Stop temporary recording' : 'Start temporary recording'}
                     className={cn(
-                      'relative flex h-20 w-20 items-center justify-center rounded-full transition-all',
+                      'relative flex h-20 w-20 items-center justify-center rounded-full transition-all disabled:cursor-not-allowed disabled:opacity-40',
                       isRecording ? 'bg-destructive text-white shadow-[0_0_40px_rgba(239,68,68,0.4)]' : 'bg-gradient-to-br from-primary to-secondary text-white shadow-glow hover:scale-105'
                     )}
                   >
@@ -607,7 +655,7 @@ export default function StudyNotesPage() {
                         <div className="text-xs text-muted-foreground">Duration: {activeNote.duration ?? 'Unknown'}</div>
                       </div>
                       {audioUrls[activeNote.id] && (
-                        <a href={audioUrls[activeNote.id]} download={`${activeNote.title || 'recording'}.webm`} className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-primary">
+                        <a href={audioUrls[activeNote.id]} download={`${activeNote.title || 'recording'}.webm`} aria-label="Download temporary recording" className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-primary">
                           <Download className="h-4 w-4" />
                         </a>
                       )}
@@ -628,7 +676,7 @@ export default function StudyNotesPage() {
                         type="button"
                         variant={isTranscribing ? 'destructive' : 'outline'}
                         size="sm"
-                        disabled={!speechSupported}
+                        disabled={!speechSupported || readOnly}
                         onClick={isTranscribing ? stopTranscription : startTranscription}
                         className="shrink-0 rounded-xl"
                       >
@@ -647,7 +695,7 @@ export default function StudyNotesPage() {
                     <Sparkles className="h-4 w-4" />
                     Gemini AI Summarizer
                   </div>
-                  <Button onClick={handleSummarize} disabled={summarizing || !activeNote.content.trim()} size="sm" className="rounded-xl bg-gradient-to-r from-primary to-secondary">
+                  <Button onClick={handleSummarize} disabled={readOnly || summarizing || !activeNote.content.trim()} size="sm" className="rounded-xl bg-gradient-to-r from-primary to-secondary">
                     {summarizing ? (
                       <>
                         <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />

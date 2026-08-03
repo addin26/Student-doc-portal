@@ -65,6 +65,7 @@ function formatFileSize(bytes: number): string {
 export default function UploadPage() {
   const router = useRouter();
   const [authChecked, setAuthChecked] = useState(false);
+  const [accountBlockReason, setAccountBlockReason] = useState('');
   const [dragOver, setDragOver] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -78,6 +79,8 @@ export default function UploadPage() {
   const [universitiesList, setUniversitiesList] = useState<DbUniversity[]>([]);
   const [coursesList, setCoursesList] = useState<DbCourse[]>([]);
   const [categoriesList, setCategoriesList] = useState<DbCategory[]>([]);
+  const [universitySearch, setUniversitySearch] = useState('');
+  const [courseSearch, setCourseSearch] = useState('');
   
   // Custom dialogs state
   const [showAddUniDialog, setShowAddUniDialog] = useState(false);
@@ -112,16 +115,44 @@ export default function UploadPage() {
         router.push('/auth');
         return;
       }
+
+      const { data: accountStatus, error: accountStatusError } = await supabase.rpc('get_my_account_status');
+      if (accountStatusError) {
+        setAccountBlockReason('Your account status could not be verified. Reload the page before uploading.');
+        setAuthChecked(true);
+        return;
+      }
+      if (accountStatus === 'deleted') {
+        await supabase.auth.signOut({ scope: 'local' });
+        router.replace('/auth?error=account_unavailable');
+        return;
+      }
+      if (accountStatus !== 'active') {
+        setAccountBlockReason('This account is suspended. Existing private data remains available, but uploads and other changes are disabled.');
+        setAuthChecked(true);
+        return;
+      }
       setAuthChecked(true);
 
-      const [{ data: unis }, { data: categoryData }] = await Promise.all([
-        supabase.from('universities').select('id, name, short, status').order('name'),
-        supabase.from('categories').select('id, name').order('name'),
-      ]);
-      if (unis) setUniversitiesList(unis);
-      if (categoryData) setCategoriesList(categoryData);
+      const { data: categoryData, error: categoryError } = await supabase.from('categories').select('id, name').order('name').limit(250);
+      if (categoryError) setError('Upload categories could not be loaded. Retry before submitting.');
+      else if (categoryData) setCategoriesList(categoryData);
     })();
   }, [router]);
+
+  useEffect(() => {
+    if (!authChecked) return;
+    const timer = window.setTimeout(() => {
+      const normalized = universitySearch.trim().replace(/[%_,()]/g, ' ');
+      let lookup = supabase.from('universities').select('id, name, short, status');
+      if (normalized) lookup = lookup.or(`name.ilike.%${normalized}%,short.ilike.%${normalized}%`);
+      void lookup.order('name').limit(50).then(({ data, error: lookupError }) => {
+        if (lookupError) setError('Universities could not be loaded. Retry your search.');
+        else setUniversitiesList((data ?? []) as DbUniversity[]);
+      });
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [authChecked, universitySearch]);
 
   // Load courses whenever selected university changes
   useEffect(() => {
@@ -129,15 +160,20 @@ export default function UploadPage() {
       setCoursesList([]);
       return;
     }
-    (async () => {
-      const { data: crs } = await supabase
+    const timer = window.setTimeout(() => {
+      const normalized = courseSearch.trim().replace(/[%_,()]/g, ' ');
+      let lookup = supabase
         .from('courses')
         .select('id, university_id, code, title, status')
-        .eq('university_id', form.universityId)
-        .order('code');
-      if (crs) setCoursesList(crs);
-    })();
-  }, [form.universityId]);
+        .eq('university_id', form.universityId);
+      if (normalized) lookup = lookup.or(`code.ilike.%${normalized}%,title.ilike.%${normalized}%`);
+      void lookup.order('code').limit(50).then(({ data, error: lookupError }) => {
+        if (lookupError) setError('Courses could not be loaded. Retry your search.');
+        else setCoursesList((data ?? []) as DbCourse[]);
+      });
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [courseSearch, form.universityId]);
 
   const update = (key: string, value: string) =>
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -349,6 +385,20 @@ export default function UploadPage() {
     );
   }
 
+  if (accountBlockReason) {
+    return (
+      <div className="mx-auto flex min-h-[calc(100vh-5rem)] max-w-2xl items-center px-4 py-12">
+        <div className="w-full rounded-2xl border border-border bg-card p-8 shadow-sm">
+          <h1 className="font-display text-3xl font-bold tracking-tight">Uploads unavailable</h1>
+          <p className="mt-3 text-muted-foreground" role="alert">{accountBlockReason}</p>
+          <Button className="mt-6" variant="outline" onClick={() => window.location.reload()}>
+            Retry account check
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="mx-auto max-w-4xl px-4 py-8">
       <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }}>
@@ -465,11 +515,30 @@ export default function UploadPage() {
 
               {/* University Select & Add Custom */}
               <Field label="University" required>
+                <input
+                  type="search"
+                  value={universitySearch}
+                  onChange={(event) => {
+                    setUniversitySearch(event.target.value);
+                    update('universityId', '');
+                    update('courseId', '');
+                    update('courseCode', '');
+                    setCourseSearch('');
+                  }}
+                  aria-label="Search universities"
+                  placeholder="Search university name or abbreviation"
+                  className="form-input mb-2"
+                />
                 <div className="flex gap-2">
                   <select
                     required
                     value={form.universityId}
-                    onChange={(e) => update('universityId', e.target.value)}
+                    onChange={(e) => {
+                      update('universityId', e.target.value);
+                      update('courseId', '');
+                      update('courseCode', '');
+                      setCourseSearch('');
+                    }}
                     className="filter-select flex-1"
                   >
                     <option value="">Select university</option>
@@ -494,6 +563,19 @@ export default function UploadPage() {
 
               {/* Course Select & Add Custom */}
               <Field label="Course & Short Code" required>
+                <input
+                  type="search"
+                  value={courseSearch}
+                  onChange={(event) => {
+                    setCourseSearch(event.target.value);
+                    update('courseId', '');
+                    update('courseCode', '');
+                  }}
+                  disabled={!form.universityId}
+                  aria-label="Search courses"
+                  placeholder={form.universityId ? 'Search course code or title' : 'Select a university first'}
+                  className="form-input mb-2 disabled:opacity-50"
+                />
                 <div className="flex gap-2">
                   <select
                     required

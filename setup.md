@@ -187,6 +187,10 @@ Before enabling uploads, run a staging smoke test:
    npm run build
    ```
 
+   GitHub CI repeats these checks and scans full Git history with Gitleaks. A
+   passing local build does not replace the hosted secret scan or staging
+   provider tests.
+
 2. Commit and push to a non-production branch first.
 3. Inspect the Vercel Preview deployment.
 4. Complete the verification checklist below.
@@ -201,6 +205,8 @@ use `NEXT_PUBLIC_SITE_URL` for the canonical production origin.
 - [ ] Registration creates an Auth user and one profile.
 - [ ] Email callback, login, logout, recovery, and reset redirects are allowed.
 - [ ] Signed-out users are redirected from Dashboard, Upload, and Study Notes.
+- [ ] Suspended users can read existing private notes but cannot mutate notes,
+      upload, download, or request AI; deleted users cannot read protected data.
 - [ ] Search returns only records allowed by RLS/moderation state.
 - [ ] Presigned URL responses use HTTPS and do not expose R2 credentials.
 - [ ] Upload and download work from the production origin.
@@ -214,6 +220,9 @@ use `NEXT_PUBLIC_SITE_URL` for the canonical production origin.
 - [ ] Origin checks reject cross-site mutation attempts and account/IP rate limits return 429 safely.
 - [ ] Logical account deletion schedules a 30-day erasure job; reactivation cancels it during the hold.
 - [ ] An authorized erasure worker removes private data and unapproved objects in bounded batches while approved resources become anonymous.
+- [ ] Final privacy, terms, uploader licence, copyright/takedown, support-contact,
+      retention, and moderation policies replace the clearly marked pre-launch
+      notices on `/platform-info` before public uploads are enabled.
 
 ## 9. Rollback and secret rotation
 
