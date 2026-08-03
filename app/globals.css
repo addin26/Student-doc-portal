@@ -1,0 +1,174 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 210 40% 98%;
+    --foreground: 222 47% 11%;
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+    --primary: 221 83% 53%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 244 75% 57%;
+    --secondary-foreground: 0 0% 100%;
+    --muted: 210 40% 96%;
+    --muted-foreground: 215 16% 47%;
+    --accent: 189 94% 43%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 214 32% 91%;
+    --input: 214 32% 91%;
+    --ring: 221 83% 53%;
+    --success: 160 84% 39%;
+    --chart-1: 221 83% 53%;
+    --chart-2: 244 75% 57%;
+    --chart-3: 189 94% 43%;
+    --chart-4: 160 84% 39%;
+    --chart-5: 38 92% 50%;
+    --radius: 1rem;
+  }
+  .dark {
+    --background: 222 47% 6%;
+    --foreground: 210 40% 98%;
+    --card: 222 40% 10%;
+    --card-foreground: 210 40% 98%;
+    --popover: 222 40% 10%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 221 83% 60%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 244 75% 65%;
+    --secondary-foreground: 0 0% 100%;
+    --muted: 217 33% 16%;
+    --muted-foreground: 215 20% 65%;
+    --accent: 189 94% 50%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 62% 45%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 217 33% 20%;
+    --input: 217 33% 20%;
+    --ring: 221 83% 60%;
+    --success: 160 70% 42%;
+    --chart-1: 221 83% 60%;
+    --chart-2: 244 75% 65%;
+    --chart-3: 189 94% 50%;
+    --chart-4: 160 70% 42%;
+    --chart-5: 38 92% 55%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  html {
+    scroll-behavior: smooth;
+  }
+  body {
+    @apply bg-background text-foreground;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+}
+
+@layer components {
+  .glass {
+    border: 1px solid rgba(255, 255, 255, 0.4);
+    background: rgba(255, 255, 255, 0.6);
+    @apply backdrop-blur-xl;
+  }
+  .glass-strong {
+    border: 1px solid rgba(255, 255, 255, 0.5);
+    background: rgba(255, 255, 255, 0.7);
+    @apply backdrop-blur-2xl;
+  }
+  .dark .glass {
+    border-color: rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.05);
+  }
+  .dark .glass-strong {
+    border-color: rgba(255, 255, 255, 0.15);
+    background: rgba(255, 255, 255, 0.08);
+  }
+  .gradient-text {
+    @apply bg-gradient-to-r from-primary via-secondary to-accent bg-clip-text text-transparent;
+  }
+  .gradient-text-soft {
+    @apply bg-gradient-to-r from-primary to-secondary bg-clip-text text-transparent;
+  }
+  .mesh-bg {
+    background-image:
+      radial-gradient(at 20% 20%, hsl(221 83% 60% / 0.18) 0px, transparent 50%),
+      radial-gradient(at 80% 0%, hsl(244 75% 57% / 0.15) 0px, transparent 50%),
+      radial-gradient(at 70% 70%, hsl(189 94% 50% / 0.14) 0px, transparent 50%),
+      radial-gradient(at 0% 90%, hsl(160 84% 45% / 0.1) 0px, transparent 50%);
+  }
+  .card-hover {
+    @apply transition-all duration-500 hover:shadow-glass-lg hover:-translate-y-1;
+  }
+  .filter-select {
+    @apply h-11 w-full cursor-pointer appearance-none rounded-xl border border-border bg-card pl-4 pr-10 text-sm shadow-soft outline-none transition-all hover:border-primary/40 focus:border-primary focus:ring-2 focus:ring-primary/20;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.75rem center;
+    background-size: 16px;
+  }
+  .form-input {
+    @apply h-11 w-full rounded-xl border border-border bg-background px-4 text-sm outline-none transition-all placeholder:text-muted-foreground/60 focus:border-primary focus:ring-2 focus:ring-primary/20;
+  }
+  textarea.form-input {
+    @apply h-auto py-3;
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .shimmer {
+    @apply relative overflow-hidden;
+  }
+  .shimmer::after {
+    @apply absolute inset-0 -translate-x-full;
+    content: '';
+    background: linear-gradient(
+      90deg,
+      transparent,
+      rgba(255, 255, 255, 0.5),
+      transparent
+    );
+    animation: shimmer 2s infinite;
+  }
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--muted-foreground) / 0.3);
+  border-radius: 99px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground) / 0.5);
+  background-clip: padding-box;
+}
+
+::selection {
+  background: hsl(var(--primary) / 0.2);
+}

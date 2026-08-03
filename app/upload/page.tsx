@@ -1,0 +1,739 @@
+'use client';
+
+import { useState, useRef, useCallback, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+import { motion, AnimatePresence } from 'framer-motion';
+import {
+  UploadCloud,
+  File as FileIcon,
+  X,
+  CheckCircle2,
+  Sparkles,
+  Info,
+  Loader2,
+  Plus,
+} from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { categories } from '@/lib/data';
+import { supabase } from '@/lib/supabase';
+import { cn } from '@/lib/utils';
+
+const fileTypesAccepted = ['PDF', 'PPT', 'DOCX', 'ZIP', 'Images', 'Excel', 'Video'];
+const acceptedExtensions = ['.pdf', '.ppt', '.pptx', '.docx', '.zip', '.png', '.jpg', '.jpeg', '.gif', '.webp', '.xlsx', '.xls', '.mp4', '.webm', '.mov'];
+const MAX_SIZE = 100 * 1024 * 1024; // 100 MB
+
+interface DbUniversity {
+  id: string;
+  name: string;
+  short: string;
+  status: string;
+}
+
+interface DbCourse {
+  id: string;
+  university_id: string;
+  code: string;
+  title: string;
+  status: string;
+}
+
+function getFileType(filename: string): string {
+  const ext = filename.split('.').pop()?.toLowerCase() ?? '';
+  const map: Record<string, string> = {
+    pdf: 'pdf', ppt: 'ppt', pptx: 'ppt', docx: 'docx', zip: 'zip',
+    png: 'img', jpg: 'img', jpeg: 'img', gif: 'img', webp: 'img',
+    xlsx: 'xlsx', xls: 'xlsx', mp4: 'video', webm: 'video', mov: 'video',
+  };
+  return map[ext] ?? 'pdf';
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+export default function UploadPage() {
+  const router = useRouter();
+  const [authChecked, setAuthChecked] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
+  const [file, setFile] = useState<File | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [submitted, setSubmitted] = useState(false);
+  const [error, setError] = useState('');
+
+  // DB reference lists
+  const [universitiesList, setUniversitiesList] = useState<DbUniversity[]>([]);
+  const [coursesList, setCoursesList] = useState<DbCourse[]>([]);
+  
+  // Custom dialogs state
+  const [showAddUniDialog, setShowAddUniDialog] = useState(false);
+  const [newUniName, setNewUniName] = useState('');
+  const [newUniShort, setNewUniShort] = useState('');
+  const [addingUni, setAddingUni] = useState(false);
+
+  const [showAddCourseDialog, setShowAddCourseDialog] = useState(false);
+  const [newCourseCode, setNewCourseCode] = useState('');
+  const [newCourseTitle, setNewCourseTitle] = useState('');
+  const [addingCourse, setAddingCourse] = useState(false);
+
+  const [form, setForm] = useState({
+    title: '',
+    universityId: '',
+    department: '',
+    courseId: '',
+    courseCode: '',
+    semester: '',
+    subject: '',
+    category: '',
+    description: '',
+    tags: '',
+  });
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Auth gate & load initial DB lists
+  useEffect(() => {
+    (async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        router.push('/auth');
+        return;
+      }
+      setAuthChecked(true);
+
+      // Load universities
+      const { data: unis } = await supabase
+        .from('universities')
+        .select('id, name, short, status')
+        .order('name');
+      if (unis) setUniversitiesList(unis);
+    })();
+  }, [router]);
+
+  // Load courses whenever selected university changes
+  useEffect(() => {
+    if (!form.universityId) {
+      setCoursesList([]);
+      return;
+    }
+    (async () => {
+      const { data: crs } = await supabase
+        .from('courses')
+        .select('id, university_id, code, title, status')
+        .eq('university_id', form.universityId)
+        .order('code');
+      if (crs) setCoursesList(crs);
+    })();
+  }, [form.universityId]);
+
+  const update = (key: string, value: string) =>
+    setForm((prev) => ({ ...prev, [key]: value }));
+
+  // Add custom university
+  const handleAddCustomUniversity = async () => {
+    if (!newUniName.trim()) return;
+    setAddingUni(true);
+    try {
+      const shortName = newUniShort.trim() || newUniName.slice(0, 5).toUpperCase();
+      const { data, error } = await supabase
+        .from('universities')
+        .insert({
+          name: newUniName.trim(),
+          short: shortName,
+          country: 'Global',
+          status: 'custom_pending',
+        })
+        .select('id, name, short, status')
+        .single();
+
+      if (error) throw error;
+      if (data) {
+        setUniversitiesList((prev) => [...prev, data].sort((a, b) => a.name.localeCompare(b.name)));
+        update('universityId', data.id);
+        setNewUniName('');
+        setNewUniShort('');
+        setShowAddUniDialog(false);
+      }
+    } catch (err: any) {
+      setError(err.message || 'Failed to add university.');
+    } finally {
+      setAddingUni(false);
+    }
+  };
+
+  // Add custom course
+  const handleAddCustomCourse = async () => {
+    if (!form.universityId || !newCourseCode.trim() || !newCourseTitle.trim()) return;
+    setAddingCourse(true);
+    try {
+      const { data, error } = await supabase
+        .from('courses')
+        .insert({
+          university_id: form.universityId,
+          code: newCourseCode.trim().toUpperCase(),
+          title: newCourseTitle.trim(),
+          status: 'custom_pending',
+        })
+        .select('id, university_id, code, title, status')
+        .single();
+
+      if (error) throw error;
+      if (data) {
+        setCoursesList((prev) => [...prev, data]);
+        update('courseId', data.id);
+        update('courseCode', data.code);
+        setNewCourseCode('');
+        setNewCourseTitle('');
+        setShowAddCourseDialog(false);
+      }
+    } catch (err: any) {
+      setError(err.message || 'Failed to add course.');
+    } finally {
+      setAddingCourse(false);
+    }
+  };
+
+  const handleFileSelect = useCallback((selected: File | null) => {
+    if (!selected) return;
+    setError('');
+    const ext = '.' + (selected.name.split('.').pop()?.toLowerCase() ?? '');
+    if (!acceptedExtensions.includes(ext)) {
+      setError(`Unsupported file type. Accepted: ${fileTypesAccepted.join(', ')}`);
+      return;
+    }
+    if (selected.size > MAX_SIZE) {
+      setError('File too large. Maximum size is 100 MB.');
+      return;
+    }
+    setFile(selected);
+  }, []);
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(false);
+    handleFileSelect(e.dataTransfer.files[0] ?? null);
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!file) {
+      setError('Please select a file to upload.');
+      return;
+    }
+    setError('');
+    setUploading(true);
+    setUploadProgress(10);
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        router.push('/auth');
+        return;
+      }
+      const token = session.access_token;
+      const userId = session.user.id;
+
+      // 1. Get Cloudflare R2 Presigned Upload URL
+      const presignedRes = await fetch('/api/upload/presigned-url', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          fileName: file.name,
+          fileType: file.type || 'application/octet-stream',
+          fileSize: file.size,
+        }),
+      });
+
+      if (!presignedRes.ok) {
+        const errJson = await presignedRes.json();
+        throw new Error(errJson.error || 'Could not prepare upload session.');
+      }
+
+      const { uploadUrl, storageKey, storageProvider } = await presignedRes.json();
+
+      setUploadProgress(30);
+
+      // 2. Upload file directly to Cloudflare R2 via Presigned PUT URL
+      const r2UploadRes = await fetch(uploadUrl, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': file.type || 'application/octet-stream',
+        },
+        body: file,
+      });
+
+      if (!r2UploadRes.ok) {
+        throw new Error('Direct file stream to Cloudflare R2 failed.');
+      }
+
+      setUploadProgress(70);
+
+      // 3. AI Document Summarization with Gemini Flash
+      let aiSummary = '';
+      let aiTopics: string[] = [];
+      try {
+        const aiRes = await fetch('/api/ai/summarize', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            documentText: `${form.title}. ${form.description}. Category: ${form.category}`,
+            title: form.title,
+          }),
+        });
+        if (aiRes.ok) {
+          const aiJson = await aiRes.json();
+          aiSummary = aiJson.summary;
+          aiTopics = aiJson.suggestedTags || [];
+        }
+      } catch (aiErr) {
+        console.warn('AI summary background process skipped:', aiErr);
+      }
+
+      setUploadProgress(90);
+
+      // Find category id
+      let categoryId: string | null = null;
+      if (form.category) {
+        const { data: catData } = await supabase
+          .from('categories')
+          .select('id')
+          .eq('name', form.category)
+          .maybeSingle();
+        categoryId = catData?.id ?? null;
+      }
+
+      const userTags = form.tags
+        .split(',')
+        .map((t) => t.trim().toLowerCase())
+        .filter(Boolean);
+      const combinedTags = Array.from(new Set([...userTags, ...aiTopics]));
+
+      // 4. Create Resource record in Supabase Database
+      const { error: dbError } = await supabase.from('resources').insert({
+        title: form.title,
+        description: form.description,
+        university_id: form.universityId || null,
+        course_id: form.courseId || null,
+        department: form.department,
+        course_code: form.courseCode,
+        semester: form.semester,
+        subject: form.subject,
+        file_type: getFileType(file.name),
+        file_size: formatFileSize(file.size),
+        storage_provider: storageProvider || 'r2',
+        storage_key: storageKey,
+        ai_summary: aiSummary,
+        ai_topics: aiTopics,
+        tags: combinedTags,
+        category_id: categoryId,
+        uploader_id: userId,
+      });
+
+      if (dbError) throw dbError;
+
+      // Increment profile upload count
+      await supabase.rpc('increment_uploads', { user_id: userId }).then(({ error }) => {
+        if (error) console.error('Could not update upload count:', error.message);
+      });
+
+      setUploadProgress(100);
+      setSubmitted(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Upload failed. Please try again.');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const resetForm = () => {
+    setSubmitted(false);
+    setFile(null);
+    setUploadProgress(0);
+    setError('');
+    setForm({ title: '', universityId: '', department: '', courseId: '', courseCode: '', semester: '', subject: '', category: '', description: '', tags: '' });
+  };
+
+  if (!authChecked) {
+    return (
+      <div className="flex min-h-[calc(100vh-5rem)] items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="mx-auto max-w-4xl px-4 py-8">
+      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }}>
+        <h1 className="font-display text-3xl font-bold tracking-tight md:text-4xl">Upload a Resource</h1>
+        <p className="mt-2 text-muted-foreground">
+          Share your study materials to Cloudflare R2 and earn XP. Powered by Gemini AI.
+        </p>
+      </motion.div>
+
+      <AnimatePresence mode="wait">
+        {submitted ? (
+          <motion.div
+            key="success"
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0 }}
+            className="mt-10 flex flex-col items-center justify-center rounded-3xl border border-border bg-card p-12 text-center shadow-soft"
+          >
+            <motion.div
+              initial={{ scale: 0 }}
+              animate={{ scale: 1 }}
+              transition={{ type: 'spring', stiffness: 200, delay: 0.2 }}
+              className="flex h-20 w-20 items-center justify-center rounded-full bg-success/10 text-success"
+            >
+              <CheckCircle2 className="h-10 w-10" />
+            </motion.div>
+            <h2 className="mt-6 font-display text-2xl font-bold">Upload complete!</h2>
+            <p className="mt-2 max-w-md text-muted-foreground">
+              Your resource has been uploaded to Cloudflare R2 and summarized by Gemini AI. You earned +50 XP.
+            </p>
+            <div className="mt-6 flex gap-3">
+              <Button className="rounded-xl" onClick={resetForm}>Upload another</Button>
+              <Button variant="outline" className="rounded-xl" asChild>
+                <a href="/explore">View on explore</a>
+              </Button>
+            </div>
+          </motion.div>
+        ) : (
+          <motion.form
+            key="form"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onSubmit={handleSubmit}
+            className="mt-10 space-y-8"
+          >
+            {/* file dropzone */}
+            <div>
+              <label className="mb-2 block text-sm font-semibold">File</label>
+              <div
+                onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+                onDragLeave={() => setDragOver(false)}
+                onDrop={handleDrop}
+                onClick={() => fileInputRef.current?.click()}
+                className={cn(
+                  'flex cursor-pointer flex-col items-center justify-center rounded-3xl border-2 border-dashed p-10 text-center transition-all',
+                  dragOver ? 'border-primary bg-primary/5' : 'border-border bg-card hover:border-primary/40',
+                )}
+              >
+                {file ? (
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+                      <FileIcon className="h-6 w-6" />
+                    </div>
+                    <div className="text-left">
+                      <div className="text-sm font-semibold">{file.name}</div>
+                      <div className="text-xs text-muted-foreground">{formatFileSize(file.size)}</div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); setFile(null); }}
+                      className="ml-2 rounded-lg p-1.5 text-muted-foreground hover:bg-muted"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <motion.div
+                      animate={{ y: [0, -8, 0] }}
+                      transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
+                      className="flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-primary/10 to-secondary/10 text-primary"
+                    >
+                      <UploadCloud className="h-8 w-8" />
+                    </motion.div>
+                    <p className="mt-4 text-sm font-medium">Drag & drop your file here</p>
+                    <p className="mt-1 text-xs text-muted-foreground">or click to browse</p>
+                    <p className="mt-3 text-xs text-muted-foreground">Max 100 MB • {fileTypesAccepted.join(', ')}</p>
+                  </>
+                )}
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept={acceptedExtensions.join(',')}
+                  className="hidden"
+                  onChange={(e) => handleFileSelect(e.target.files?.[0] ?? null)}
+                />
+              </div>
+            </div>
+
+            {/* form fields */}
+            <div className="grid gap-5 rounded-3xl border border-border bg-card p-6 shadow-soft md:grid-cols-2">
+              <Field label="Title" required full>
+                <input
+                  required
+                  value={form.title}
+                  onChange={(e) => update('title', e.target.value)}
+                  placeholder="e.g. Corporate Finance — Complete Lecture Notes"
+                  className="form-input"
+                />
+              </Field>
+
+              {/* University Select & Add Custom */}
+              <Field label="University" required>
+                <div className="flex gap-2">
+                  <select
+                    value={form.universityId}
+                    onChange={(e) => update('universityId', e.target.value)}
+                    className="filter-select flex-1"
+                  >
+                    <option value="">Select university</option>
+                    {universitiesList.map((u) => (
+                      <option key={u.id} value={u.id}>
+                        {u.name} {u.status === 'custom_pending' ? '(Pending Review)' : ''}
+                      </option>
+                    ))}
+                  </select>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    title="Add custom university if not found"
+                    onClick={() => setShowAddUniDialog(true)}
+                    className="rounded-xl border-border"
+                  >
+                    <Plus className="h-4 w-4" />
+                  </Button>
+                </div>
+              </Field>
+
+              {/* Course Select & Add Custom */}
+              <Field label="Course & Short Code" required>
+                <div className="flex gap-2">
+                  <select
+                    value={form.courseId}
+                    disabled={!form.universityId}
+                    onChange={(e) => {
+                      const selectedCrs = coursesList.find((c) => c.id === e.target.value);
+                      update('courseId', e.target.value);
+                      if (selectedCrs) update('courseCode', selectedCrs.code);
+                    }}
+                    className="filter-select flex-1 disabled:opacity-50"
+                  >
+                    <option value="">
+                      {form.universityId ? 'Select course / short code' : 'Select university first'}
+                    </option>
+                    {coursesList.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.code} — {c.title}
+                      </option>
+                    ))}
+                  </select>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    disabled={!form.universityId}
+                    title="Add custom course code if not found"
+                    onClick={() => setShowAddCourseDialog(true)}
+                    className="rounded-xl border-border disabled:opacity-50"
+                  >
+                    <Plus className="h-4 w-4" />
+                  </Button>
+                </div>
+              </Field>
+
+              <Field label="Department" required>
+                <input
+                  required
+                  value={form.department}
+                  onChange={(e) => update('department', e.target.value)}
+                  placeholder="e.g. Finance & Accounting"
+                  className="form-input"
+                />
+              </Field>
+
+              <Field label="Semester" required>
+                <input
+                  required
+                  value={form.semester}
+                  onChange={(e) => update('semester', e.target.value)}
+                  placeholder="e.g. Fall 2024"
+                  className="form-input"
+                />
+              </Field>
+
+              <Field label="Category" full>
+                <select value={form.category} onChange={(e) => update('category', e.target.value)} className="filter-select">
+                  <option value="">Select category</option>
+                  {categories.map((c) => (
+                    <option key={c.id} value={c.name}>{c.name}</option>
+                  ))}
+                </select>
+              </Field>
+
+              <Field label="Description" required full>
+                <textarea
+                  required
+                  value={form.description}
+                  onChange={(e) => update('description', e.target.value)}
+                  placeholder="Describe what this resource contains..."
+                  className="form-input h-28 resize-none"
+                />
+              </Field>
+
+              <Field label="Tags" full>
+                <input
+                  value={form.tags}
+                  onChange={(e) => update('tags', e.target.value)}
+                  placeholder="comma-separated, e.g. corporate-finance, fin-435, valuation"
+                  className="form-input"
+                />
+              </Field>
+            </div>
+
+            {/* AI features hint */}
+            <div className="flex items-start gap-3 rounded-2xl border border-primary/20 bg-primary/5 p-4">
+              <Sparkles className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
+              <div>
+                <p className="text-sm font-semibold text-primary">Gemini 1.5/2.0 Flash AI Auto-Summarizer</p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Your document will be stored securely on Cloudflare R2 and summarized automatically by Gemini Flash.
+                </p>
+              </div>
+            </div>
+
+            {error && (
+              <p className="rounded-lg bg-destructive/10 px-4 py-3 text-sm text-destructive">{error}</p>
+            )}
+
+            {uploading && (
+              <div className="rounded-2xl border border-border bg-card p-4 shadow-soft">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="flex items-center gap-2 font-medium">
+                    <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                    Uploading to Cloudflare R2 & Generating AI Summary...
+                  </span>
+                  <span className="tabular-nums text-muted-foreground">{uploadProgress}%</span>
+                </div>
+                <div className="mt-2 h-2 overflow-hidden rounded-full bg-muted">
+                  <motion.div
+                    className="h-full rounded-full bg-gradient-to-r from-primary to-secondary"
+                    initial={{ width: '0%' }}
+                    animate={{ width: `${uploadProgress}%` }}
+                    transition={{ ease: 'easeOut' }}
+                  />
+                </div>
+              </div>
+            )}
+
+            <div className="flex items-center justify-between gap-4">
+              <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <Info className="h-4 w-4" />
+                By uploading, you confirm you have the right to share this content.
+              </p>
+              <Button
+                type="submit"
+                size="lg"
+                disabled={uploading}
+                className="h-12 rounded-2xl bg-gradient-to-r from-primary to-secondary px-8 shadow-glow disabled:opacity-50"
+              >
+                {uploading ? (
+                  <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                ) : (
+                  <UploadCloud className="mr-2 h-5 w-5" />
+                )}
+                {uploading ? 'Uploading...' : 'Upload Resource'}
+              </Button>
+            </div>
+          </motion.form>
+        )}
+      </AnimatePresence>
+
+      {/* Add Custom University Modal */}
+      {showAddUniDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-3xl border border-border bg-card p-6 shadow-glow">
+            <h3 className="text-xl font-bold">Add Custom University</h3>
+            <p className="mt-1 text-sm text-muted-foreground">
+              If your university is not in the list, type it below. Admins will review and merge custom entries.
+            </p>
+            <div className="mt-4 space-y-4">
+              <div>
+                <label className="text-xs font-semibold">University Full Name</label>
+                <input
+                  value={newUniName}
+                  onChange={(e) => setNewUniName(e.target.value)}
+                  placeholder="e.g. Boston University"
+                  className="form-input mt-1"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-semibold">Abbreviation / Short Code</label>
+                <input
+                  value={newUniShort}
+                  onChange={(e) => setNewUniShort(e.target.value)}
+                  placeholder="e.g. BU"
+                  className="form-input mt-1"
+                />
+              </div>
+            </div>
+            <div className="mt-6 flex justify-end gap-3">
+              <Button variant="ghost" onClick={() => setShowAddUniDialog(false)}>Cancel</Button>
+              <Button onClick={handleAddCustomUniversity} disabled={addingUni || !newUniName.trim()}>
+                {addingUni ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Save University'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add Custom Course Modal */}
+      {showAddCourseDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-3xl border border-border bg-card p-6 shadow-glow">
+            <h3 className="text-xl font-bold">Add Custom Course</h3>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Add a new course short code and title for this university.
+            </p>
+            <div className="mt-4 space-y-4">
+              <div>
+                <label className="text-xs font-semibold">Course Code (e.g., ACC-401, FIN-435)</label>
+                <input
+                  value={newCourseCode}
+                  onChange={(e) => setNewCourseCode(e.target.value)}
+                  placeholder="e.g. FIN-435"
+                  className="form-input mt-1 uppercase"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-semibold">Course Title</label>
+                <input
+                  value={newCourseTitle}
+                  onChange={(e) => setNewCourseTitle(e.target.value)}
+                  placeholder="e.g. Advanced Financial Modeling"
+                  className="form-input mt-1"
+                />
+              </div>
+            </div>
+            <div className="mt-6 flex justify-end gap-3">
+              <Button variant="ghost" onClick={() => setShowAddCourseDialog(false)}>Cancel</Button>
+              <Button onClick={handleAddCustomCourse} disabled={addingCourse || !newCourseCode.trim() || !newCourseTitle.trim()}>
+                {addingCourse ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Save Course'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Field({ label, children, required, full }: { label: string; children: React.ReactNode; required?: boolean; full?: boolean }) {
+  return (
+    <div className={full ? 'md:col-span-2' : ''}>
+      <label className="mb-1.5 block text-sm font-semibold">
+        {label} {required && <span className="text-destructive">*</span>}
+      </label>
+      {children}
+    </div>
+  );
+}

@@ -1,0 +1,553 @@
+export type FileType = 'pdf' | 'ppt' | 'docx' | 'zip' | 'img' | 'xlsx' | 'video';
+
+export const FILE_TYPE_META: Record<
+  FileType,
+  { label: string; color: string; bg: string }
+> = {
+  pdf: { label: 'PDF', color: 'text-red-600', bg: 'bg-red-50 dark:bg-red-500/10' },
+  ppt: { label: 'PPT', color: 'text-orange-600', bg: 'bg-orange-50 dark:bg-orange-500/10' },
+  docx: { label: 'DOCX', color: 'text-blue-600', bg: 'bg-blue-50 dark:bg-blue-500/10' },
+  zip: { label: 'ZIP', color: 'text-amber-600', bg: 'bg-amber-50 dark:bg-amber-500/10' },
+  img: { label: 'IMG', color: 'text-emerald-600', bg: 'bg-emerald-50 dark:bg-emerald-500/10' },
+  xlsx: { label: 'XLSX', color: 'text-green-600', bg: 'bg-green-50 dark:bg-green-500/10' },
+  video: { label: 'VIDEO', color: 'text-purple-600', bg: 'bg-purple-50 dark:bg-purple-500/10' },
+};
+
+export type Resource = {
+  id: string;
+  title: string;
+  description: string;
+  university: string;
+  universityShort: string;
+  department: string;
+  courseCode: string;
+  semester: string;
+  subject: string;
+  fileType: FileType;
+  fileSize: string;
+  pages?: number;
+  uploader: string;
+  uploaderAvatar: string;
+  uploaderVerified: boolean;
+  rating: number;
+  ratingCount: number;
+  downloads: number;
+  views: number;
+  bookmarks: number;
+  comments: number;
+  tags: string[];
+  uploadDate: string;
+  trending: boolean;
+  featured: boolean;
+  premium: boolean;
+  category: string;
+};
+
+export type University = {
+  id: string;
+  name: string;
+  short: string;
+  country: string;
+  resources: number;
+  contributors: number;
+  departments: number;
+  color: string;
+  departments_list: string[];
+  popularSubjects: string[];
+};
+
+export type Contributor = {
+  id: string;
+  name: string;
+  avatar: string;
+  university: string;
+  points: number;
+  level: number;
+  uploads: number;
+  downloads: number;
+  badge: string;
+  verified: boolean;
+  rank: number;
+};
+
+export type Category = {
+  id: string;
+  name: string;
+  icon: string;
+  count: number;
+  description: string;
+};
+
+export const categories: Category[] = [
+  { id: 'reports', name: 'Reports', icon: 'FileText', count: 18420, description: 'Lab reports, project reports & analysis' },
+  { id: 'assignments', name: 'Assignments', icon: 'ClipboardList', count: 24210, description: 'Completed assignments & homework' },
+  { id: 'presentations', name: 'Presentations', icon: 'Presentation', count: 15890, description: 'Slides & decks for class' },
+  { id: 'case-analysis', name: 'Case Analysis', icon: 'Scale', count: 8420, description: 'Business & legal case studies' },
+  { id: 'lecture-notes', name: 'Lecture Notes', icon: 'BookOpen', count: 31200, description: 'Notes taken during lectures' },
+  { id: 'lab-reports', name: 'Lab Reports', icon: 'FlaskConical', count: 11200, description: 'Science & engineering lab work' },
+  { id: 'research-papers', name: 'Research Papers', icon: 'Microscope', count: 6750, description: 'Theses & academic research' },
+  { id: 'question-papers', name: 'Past Papers', icon: 'FileQuestion', count: 19800, description: 'Previous exam question papers' },
+  { id: 'class-notes', name: 'Class Notes', icon: 'NotebookPen', count: 27400, description: 'Quick class & topic notes' },
+  { id: 'thesis', name: 'Thesis', icon: 'GraduationCap', count: 4120, description: 'Final-year thesis & dissertations' },
+  { id: 'cheat-sheets', name: 'Cheat Sheets', icon: 'ScrollText', count: 9300, description: 'Quick reference summaries' },
+  { id: 'study-guides', name: 'Study Guides', icon: 'Map', count: 7600, description: 'Comprehensive exam prep guides' },
+];
+
+export const universities: University[] = [
+  {
+    id: 'stanford',
+    name: 'Stanford University',
+    short: 'SU',
+    country: 'United States',
+    resources: 8420,
+    contributors: 1240,
+    departments: 18,
+    color: 'from-red-500 to-rose-600',
+    departments_list: ['Computer Science', 'Electrical Engineering', 'Mechanical Engineering', 'Business', 'Biology', 'Mathematics'],
+    popularSubjects: ['Machine Learning', 'Data Structures', 'Thermodynamics', 'Microeconomics'],
+  },
+  {
+    id: 'mit',
+    name: 'Massachusetts Institute of Technology',
+    short: 'MIT',
+    country: 'United States',
+    resources: 9210,
+    contributors: 1580,
+    departments: 22,
+    color: 'from-slate-700 to-slate-900',
+    departments_list: ['Computer Science', 'Aerospace Engineering', 'Physics', 'Mathematics', 'Chemistry'],
+    popularSubjects: ['Algorithms', 'Quantum Physics', 'Linear Algebra', 'Organic Chemistry'],
+  },
+  {
+    id: 'oxford',
+    name: 'University of Oxford',
+    short: 'OX',
+    country: 'United Kingdom',
+    resources: 6720,
+    contributors: 980,
+    departments: 16,
+    color: 'from-blue-700 to-indigo-800',
+    departments_list: ['Philosophy', 'Law', 'Medicine', 'History', 'English', 'Economics'],
+    popularSubjects: ['Jurisprudence', 'Microeconomics', 'British History', 'Clinical Medicine'],
+  },
+  {
+    id: 'nus',
+    name: 'National University of Singapore',
+    short: 'NUS',
+    country: 'Singapore',
+    resources: 5310,
+    contributors: 870,
+    departments: 14,
+    color: 'from-orange-500 to-red-600',
+    departments_list: ['Computer Science', 'Business', 'Engineering', 'Medicine', 'Law'],
+    popularSubjects: ['Software Engineering', 'Finance', 'Machine Learning', 'Corporate Law'],
+  },
+  {
+    id: 'eth',
+    name: 'ETH Zurich',
+    short: 'ETH',
+    country: 'Switzerland',
+    resources: 4820,
+    contributors: 720,
+    departments: 12,
+    color: 'from-emerald-600 to-teal-700',
+    departments_list: ['Computer Science', 'Mechanical Engineering', 'Physics', 'Architecture'],
+    popularSubjects: ['Computer Graphics', 'Robotics', 'Statistical Physics', 'Structural Design'],
+  },
+  {
+    id: 'iitb',
+    name: 'IIT Bombay',
+    short: 'IITB',
+    country: 'India',
+    resources: 7240,
+    contributors: 1100,
+    departments: 20,
+    color: 'from-indigo-600 to-blue-700',
+    departments_list: ['Computer Science', 'Electrical Engineering', 'Mechanical Engineering', 'Chemical Engineering'],
+    popularSubjects: ['Operating Systems', 'Signals & Systems', 'Fluid Mechanics', 'DBMS'],
+  },
+];
+
+export const contributors: Contributor[] = [
+  { id: '1', name: 'Aanya Sharma', avatar: 'AS', university: 'IIT Bombay', points: 18420, level: 12, uploads: 142, downloads: 28400, badge: 'Diamond', verified: true, rank: 1 },
+  { id: '2', name: 'Lucas Müller', avatar: 'LM', university: 'ETH Zurich', points: 16280, level: 11, uploads: 118, downloads: 24100, badge: 'Diamond', verified: true, rank: 2 },
+  { id: '3', name: 'Emma Chen', avatar: 'EC', university: 'Stanford University', points: 14920, level: 10, uploads: 96, downloads: 19800, badge: 'Platinum', verified: true, rank: 3 },
+  { id: '4', name: 'Rahul Verma', avatar: 'RV', university: 'NUS', points: 12100, level: 9, uploads: 84, downloads: 16200, badge: 'Platinum', verified: true, rank: 4 },
+  { id: '5', name: 'Sofia Rossi', avatar: 'SR', university: 'University of Oxford', points: 10840, level: 8, uploads: 72, downloads: 13400, badge: 'Gold', verified: true, rank: 5 },
+  { id: '6', name: 'James Park', avatar: 'JP', university: 'MIT', points: 9420, level: 8, uploads: 61, downloads: 11200, badge: 'Gold', verified: false, rank: 6 },
+];
+
+export const resources: Resource[] = [
+  {
+    id: 'r1',
+    title: 'Machine Learning — Complete Lecture Notes (CS229)',
+    description: 'Comprehensive lecture notes covering supervised learning, unsupervised learning, reinforcement learning, and deep learning fundamentals. Includes worked examples and problem sets with solutions.',
+    university: 'Stanford University',
+    universityShort: 'SU',
+    department: 'Computer Science',
+    courseCode: 'CS229',
+    semester: 'Fall 2024',
+    subject: 'Machine Learning',
+    fileType: 'pdf',
+    fileSize: '24.6 MB',
+    pages: 186,
+    uploader: 'Emma Chen',
+    uploaderAvatar: 'EC',
+    uploaderVerified: true,
+    rating: 4.9,
+    ratingCount: 342,
+    downloads: 12840,
+    views: 42100,
+    bookmarks: 2410,
+    comments: 86,
+    tags: ['machine-learning', 'supervised', 'neural-networks', 'python'],
+    uploadDate: '2024-12-14',
+    trending: true,
+    featured: true,
+    premium: false,
+    category: 'lecture-notes',
+  },
+  {
+    id: 'r2',
+    title: 'Data Structures & Algorithms — Full Course Slides',
+    description: 'Complete presentation deck covering arrays, linked lists, trees, graphs, sorting algorithms, and dynamic programming with visual diagrams and complexity analysis.',
+    university: 'Massachusetts Institute of Technology',
+    universityShort: 'MIT',
+    department: 'Computer Science',
+    courseCode: '6.006',
+    semester: 'Spring 2024',
+    subject: 'Algorithms',
+    fileType: 'ppt',
+    fileSize: '42.1 MB',
+    pages: 240,
+    uploader: 'James Park',
+    uploaderAvatar: 'JP',
+    uploaderVerified: false,
+    rating: 4.8,
+    ratingCount: 289,
+    downloads: 9820,
+    views: 31400,
+    bookmarks: 1820,
+    comments: 54,
+    tags: ['algorithms', 'data-structures', 'complexity', 'interview-prep'],
+    uploadDate: '2024-12-10',
+    trending: true,
+    featured: false,
+    premium: false,
+    category: 'presentations',
+  },
+  {
+    id: 'r3',
+    title: 'Organic Chemistry Lab Report — Synthesis of Aspirin',
+    description: 'Detailed lab report documenting the synthesis of acetylsalicylic acid including procedure, observations, yield calculation, melting point analysis, and IR spectroscopy results.',
+    university: 'Massachusetts Institute of Technology',
+    universityShort: 'MIT',
+    department: 'Chemistry',
+    courseCode: '5.12',
+    semester: 'Fall 2024',
+    subject: 'Organic Chemistry',
+    fileType: 'pdf',
+    fileSize: '8.2 MB',
+    pages: 24,
+    uploader: 'Lucas Müller',
+    uploaderAvatar: 'LM',
+    uploaderVerified: true,
+    rating: 4.7,
+    ratingCount: 156,
+    downloads: 6420,
+    views: 18200,
+    bookmarks: 980,
+    comments: 32,
+    tags: ['organic-chemistry', 'synthesis', 'lab-report', 'spectroscopy'],
+    uploadDate: '2024-12-08',
+    trending: true,
+    featured: false,
+    premium: false,
+    category: 'lab-reports',
+  },
+  {
+    id: 'r4',
+    title: 'Corporate Law — Case Analysis: Carlill v Carbolic Smoke Ball',
+    description: 'In-depth case analysis of the landmark contract law case examining invitation to treat, offer, acceptance, and consideration with modern applications.',
+    university: 'University of Oxford',
+    universityShort: 'OX',
+    department: 'Law',
+    courseCode: 'LAW201',
+    semester: 'Hilary 2024',
+    subject: 'Corporate Law',
+    fileType: 'docx',
+    fileSize: '1.8 MB',
+    pages: 18,
+    uploader: 'Sofia Rossi',
+    uploaderAvatar: 'SR',
+    uploaderVerified: true,
+    rating: 4.9,
+    ratingCount: 98,
+    downloads: 4210,
+    views: 12400,
+    bookmarks: 720,
+    comments: 21,
+    tags: ['law', 'case-analysis', 'contract-law', 'uk-law'],
+    uploadDate: '2024-12-05',
+    trending: false,
+    featured: true,
+    premium: false,
+    category: 'case-analysis',
+  },
+  {
+    id: 'r5',
+    title: 'Operating Systems — Past Exam Papers (2019–2024)',
+    description: 'Collection of previous year exam question papers for Operating Systems course with patterns analysis and topic frequency breakdown.',
+    university: 'IIT Bombay',
+    universityShort: 'IITB',
+    department: 'Computer Science',
+    courseCode: 'CS330',
+    semester: 'Autumn 2024',
+    subject: 'Operating Systems',
+    fileType: 'pdf',
+    fileSize: '15.4 MB',
+    pages: 96,
+    uploader: 'Aanya Sharma',
+    uploaderAvatar: 'AS',
+    uploaderVerified: true,
+    rating: 4.8,
+    ratingCount: 412,
+    downloads: 18420,
+    views: 52100,
+    bookmarks: 3210,
+    comments: 112,
+    tags: ['operating-systems', 'exam-papers', 'previous-year', 'scheduling'],
+    uploadDate: '2024-12-12',
+    trending: true,
+    featured: true,
+    premium: false,
+    category: 'question-papers',
+  },
+  {
+    id: 'r6',
+    title: 'Fluid Mechanics — Complete Study Guide',
+    description: 'A 120-page study guide covering fluid statics, kinematics, dynamics, dimensional analysis, and pipe flow with solved problems and formula sheets.',
+    university: 'IIT Bombay',
+    universityShort: 'IITB',
+    department: 'Mechanical Engineering',
+    courseCode: 'ME219',
+    semester: 'Spring 2024',
+    subject: 'Fluid Mechanics',
+    fileType: 'pdf',
+    fileSize: '18.7 MB',
+    pages: 124,
+    uploader: 'Rahul Verma',
+    uploaderAvatar: 'RV',
+    uploaderVerified: true,
+    rating: 4.6,
+    ratingCount: 178,
+    downloads: 5840,
+    views: 16400,
+    bookmarks: 1140,
+    comments: 38,
+    tags: ['fluid-mechanics', 'study-guide', 'dimensional-analysis', 'pipe-flow'],
+    uploadDate: '2024-12-03',
+    trending: false,
+    featured: false,
+    premium: false,
+    category: 'study-guides',
+  },
+  {
+    id: 'r7',
+    title: 'Microeconomics — Problem Set Solutions',
+    description: 'Complete solutions to all problem sets covering consumer theory, producer theory, market structures, and game theory with step-by-step explanations.',
+    university: 'Stanford University',
+    universityShort: 'SU',
+    department: 'Economics',
+    courseCode: 'ECON1',
+    semester: 'Winter 2024',
+    subject: 'Microeconomics',
+    fileType: 'pdf',
+    fileSize: '5.3 MB',
+    pages: 64,
+    uploader: 'Emma Chen',
+    uploaderAvatar: 'EC',
+    uploaderVerified: true,
+    rating: 4.7,
+    ratingCount: 142,
+    downloads: 7820,
+    views: 22400,
+    bookmarks: 1480,
+    comments: 44,
+    tags: ['microeconomics', 'consumer-theory', 'game-theory', 'solutions'],
+    uploadDate: '2024-11-28',
+    trending: false,
+    featured: false,
+    premium: false,
+    category: 'assignments',
+  },
+  {
+    id: 'r8',
+    title: 'Computer Graphics — Project Files (Ray Tracer)',
+    description: 'Complete project source code and report for a software ray tracer implementing phong shading, reflections, refractions, and anti-aliasing.',
+    university: 'ETH Zurich',
+    universityShort: 'ETH',
+    department: 'Computer Science',
+    courseCode: 'CS319',
+    semester: 'Autumn 2024',
+    subject: 'Computer Graphics',
+    fileType: 'zip',
+    fileSize: '32.8 MB',
+    pages: 42,
+    uploader: 'Lucas Müller',
+    uploaderAvatar: 'LM',
+    uploaderVerified: true,
+    rating: 4.9,
+    ratingCount: 67,
+    downloads: 2940,
+    views: 9800,
+    bookmarks: 560,
+    comments: 18,
+    tags: ['computer-graphics', 'ray-tracing', 'c++', 'project'],
+    uploadDate: '2024-11-22',
+    trending: false,
+    featured: false,
+    premium: true,
+    category: 'reports',
+  },
+  {
+    id: 'r9',
+    title: 'Linear Algebra — Cheat Sheet (All Formulas)',
+    description: 'A compact 4-page cheat sheet with every formula you need: matrix operations, eigenvalues, vector spaces, transformations, and SVD.',
+    university: 'Massachusetts Institute of Technology',
+    universityShort: 'MIT',
+    department: 'Mathematics',
+    courseCode: '18.06',
+    semester: 'Spring 2024',
+    subject: 'Linear Algebra',
+    fileType: 'pdf',
+    fileSize: '2.1 MB',
+    pages: 4,
+    uploader: 'James Park',
+    uploaderAvatar: 'JP',
+    uploaderVerified: false,
+    rating: 4.8,
+    ratingCount: 521,
+    downloads: 21400,
+    views: 68200,
+    bookmarks: 4810,
+    comments: 96,
+    tags: ['linear-algebra', 'cheat-sheet', 'formulas', 'matrices'],
+    uploadDate: '2024-12-15',
+    trending: true,
+    featured: true,
+    premium: false,
+    category: 'cheat-sheets',
+  },
+  {
+    id: 'r10',
+    title: 'Software Engineering — Final Year Thesis',
+    description: 'Bachelor thesis on microservices architecture: evaluating performance trade-offs between monolithic and microservices-based systems at scale.',
+    university: 'National University of Singapore',
+    universityShort: 'NUS',
+    department: 'Computer Science',
+    courseCode: 'CS4901',
+    semester: 'AY2024',
+    subject: 'Software Engineering',
+    fileType: 'pdf',
+    fileSize: '12.4 MB',
+    pages: 88,
+    uploader: 'Rahul Verma',
+    uploaderAvatar: 'RV',
+    uploaderVerified: true,
+    rating: 4.9,
+    ratingCount: 54,
+    downloads: 1820,
+    views: 6400,
+    bookmarks: 420,
+    comments: 12,
+    tags: ['thesis', 'microservices', 'architecture', 'performance'],
+    uploadDate: '2024-11-18',
+    trending: false,
+    featured: false,
+    premium: true,
+    category: 'thesis',
+  },
+  {
+    id: 'r11',
+    title: 'Signals & Systems — Class Notes (Full Semester)',
+    description: 'Handwritten-style class notes covering continuous & discrete signals, Fourier transforms, Laplace transforms, and LTI systems.',
+    university: 'IIT Bombay',
+    universityShort: 'IITB',
+    department: 'Electrical Engineering',
+    courseCode: 'EE225',
+    semester: 'Autumn 2024',
+    subject: 'Signals & Systems',
+    fileType: 'pdf',
+    fileSize: '28.9 MB',
+    pages: 210,
+    uploader: 'Aanya Sharma',
+    uploaderAvatar: 'AS',
+    uploaderVerified: true,
+    rating: 4.8,
+    ratingCount: 234,
+    downloads: 9120,
+    views: 28100,
+    bookmarks: 1640,
+    comments: 58,
+    tags: ['signals', 'fourier', 'laplace', 'lti-systems'],
+    uploadDate: '2024-12-01',
+    trending: true,
+    featured: false,
+    premium: false,
+    category: 'class-notes',
+  },
+  {
+    id: 'r12',
+    title: 'Finance 101 — Excel Models Bundle',
+    description: 'A bundle of Excel financial models: DCF valuation, WACC calculator, portfolio optimization, and Monte Carlo simulation templates.',
+    university: 'National University of Singapore',
+    universityShort: 'NUS',
+    department: 'Business',
+    courseCode: 'BIZ301',
+    semester: 'Sem 1 2024',
+    subject: 'Finance',
+    fileType: 'xlsx',
+    fileSize: '6.7 MB',
+    pages: 12,
+    uploader: 'Sofia Rossi',
+    uploaderAvatar: 'SR',
+    uploaderVerified: true,
+    rating: 4.7,
+    ratingCount: 188,
+    downloads: 7240,
+    views: 19800,
+    bookmarks: 2120,
+    comments: 47,
+    tags: ['finance', 'excel', 'valuation', 'dcf'],
+    uploadDate: '2024-12-09',
+    trending: false,
+    featured: false,
+    premium: false,
+    category: 'reports',
+  },
+];
+
+export const stats = [
+  { label: 'Resources', value: 120000, suffix: '+', display: '120K+' },
+  { label: 'Students', value: 50000, suffix: '+', display: '50K+' },
+  { label: 'Universities', value: 250, suffix: '+', display: '250+' },
+  { label: 'Downloads', value: 1000000, suffix: '+', display: '1M+' },
+];
+
+export const badges = [
+  { name: 'First Upload', icon: 'Upload', description: 'Upload your first resource', color: 'from-blue-500 to-cyan-500' },
+  { name: 'Rising Star', icon: 'Star', description: 'Reach 1,000 points', color: 'from-amber-500 to-orange-500' },
+  { name: 'Helping Hand', icon: 'Heart', description: 'Get 100 likes on resources', color: 'from-rose-500 to-pink-500' },
+  { name: 'Verified', icon: 'BadgeCheck', description: 'Verified contributor', color: 'from-emerald-500 to-teal-500' },
+  { name: 'Top 100', icon: 'Trophy', description: 'Enter the top 100 leaderboard', color: 'from-violet-500 to-purple-500' },
+  { name: 'Centurion', icon: 'Medal', description: 'Upload 100 resources', color: 'from-indigo-500 to-blue-500' },
+];
+
+export const notifications = [
+  { id: '1', type: 'download', title: 'Your resource was downloaded', message: 'Someone downloaded "Machine Learning Lecture Notes"', time: '2h ago', read: false },
+  { id: '2', type: 'like', title: 'New like on your notes', message: 'James Park liked your "Linear Algebra Cheat Sheet"', time: '5h ago', read: false },
+  { id: '3', type: 'badge', title: 'New badge earned!', message: 'You earned the "Helping Hand" badge', time: '1d ago', read: false },
+  { id: '4', type: 'comment', title: 'New comment', message: 'Sofia Rossi commented on your lab report', time: '2d ago', read: true },
+  { id: '5', type: 'summary', title: 'Weekly summary', message: 'You earned 420 XP this week. Great work!', time: '3d ago', read: true },
+];
