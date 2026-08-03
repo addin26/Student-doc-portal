@@ -7,6 +7,7 @@ export type AuthenticatedRequest = {
   token: string;
   user: User;
   supabase: SupabaseClient;
+  accountStatus: 'active' | 'suspended' | 'deleted';
 };
 
 export async function authenticateRequest(
@@ -35,5 +36,17 @@ export async function authenticateRequest(
   } = await supabase.auth.getUser(token);
 
   if (error || !user) return null;
-  return { token, user, supabase };
+  const { data: accountStatus, error: statusError } = await supabase.rpc(
+    'get_my_account_status',
+  );
+  if (statusError) throw new Error(`Account state check failed: ${statusError.code}`);
+  if (!['active', 'suspended', 'deleted'].includes(accountStatus)) {
+    throw new Error('Authenticated account profile is unavailable.');
+  }
+  return {
+    token,
+    user,
+    supabase,
+    accountStatus: accountStatus as AuthenticatedRequest['accountStatus'],
+  };
 }

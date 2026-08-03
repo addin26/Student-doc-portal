@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Search, Upload, Menu, X, Bell, LayoutDashboard, Sparkles, NotebookPen, LogIn, LogOut } from 'lucide-react';
+import { Search, Upload, Menu, X, Bell, LayoutDashboard, Sparkles, NotebookPen, LogIn, LogOut, UserRoundCog } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { supabase } from '@/lib/supabase';
@@ -148,15 +148,7 @@ export function Navbar() {
             </Button>
             {authReady && (
               signedIn ? (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="rounded-xl"
-                  onClick={handleSignOut}
-                >
-                  <LogOut className="mr-1.5 h-4 w-4" />
-                  Sign out
-                </Button>
+                <><Button variant="ghost" size="icon" className="rounded-xl" asChild><Link href="/account" aria-label="Account settings"><UserRoundCog className="h-4 w-4" /></Link></Button><Button variant="ghost" size="sm" className="rounded-xl" onClick={handleSignOut}><LogOut className="mr-1.5 h-4 w-4" />Sign out</Button></>
               ) : (
                 <Button variant="ghost" size="sm" className="rounded-xl" asChild>
                   <Link href="/auth">
@@ -213,6 +205,7 @@ export function Navbar() {
                   <NotebookPen className="h-4 w-4" />
                   In class Study Notes
                 </Link>
+                {signedIn && <Link href="/account" className="flex items-center gap-2 rounded-xl px-4 py-3 text-sm font-medium text-muted-foreground hover:bg-primary/5 hover:text-primary"><UserRoundCog className="h-4 w-4" />Account settings</Link>}
                 <div className="mt-2 grid grid-cols-2 gap-2">
                   {signedIn ? (
                     <Button variant="outline" size="sm" className="rounded-xl" onClick={handleSignOut}>

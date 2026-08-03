@@ -2,7 +2,7 @@
 
 | Field | Value |
 | --- | --- |
-| Document version | 2.2 |
+| Document version | 3.0 |
 | Product | STUDYDOCK Public App and STUDYDOCK Admin App |
 | Status | Implementation baseline and target specification |
 | Last updated | August 3, 2026 |
@@ -69,13 +69,14 @@ Admin status MUST be determined server-side from `profiles.role`. Hiding admin n
 flowchart LR
     Visitor[Visitor or Student]
     Admin[Administrator]
-    Public[STUDYDOCK Public App\nNext.js 13]
-    AdminApp[STUDYDOCK Admin App\nNext.js 13]
+    Public[STUDYDOCK Public App\nNext.js 16 + React 19]
+    AdminApp[STUDYDOCK Admin App\nNext.js 16 + React 19]
     API[Server Route Handlers]
     Auth[Supabase Auth]
     DB[(Supabase PostgreSQL\nRLS + RPC)]
     R2[(Private Cloudflare R2 Bucket)]
     Gemini[Google Gemini API]
+    Worker[Vercel Cron PDF Worker]
 
     Visitor --> Public
     Admin --> AdminApp
@@ -87,6 +88,7 @@ flowchart LR
     API --> DB
     API --> R2
     API --> Gemini
+    Worker --> API
     Public -->|presigned PUT/GET only| R2
 ```
 
@@ -130,6 +132,9 @@ The database MUST store the durable R2 `storage_key` and provider, not an expiri
 | `resources` | Metadata and storage reference for an uploaded file | Belongs to an uploader; may link to university, course, and category; carries moderation and AI-processing states |
 | `study_notes` | Private note owned by a user | Only the owner may read or mutate it |
 | `admin_audit_log` | Immutable record of privileged operations | Records actor, action, target, timestamp, and structured before/after metadata |
+| `storage_cleanup_jobs` | Retryable object-deletion work | Stores provider/key, attempt state, sanitized failure code, optional resource link, and whether DB deletion follows object deletion |
+| `ai_processing_jobs` | Bounded asynchronous enrichment work | One job per resource, lock/attempt/retry state, maximum attempts, and sanitized failure code |
+| `api_rate_limit_buckets` | Shared application rate-limit counters | Account/action/window key; callable only through the constrained rate-limit RPC |
 
 ### 5.2 Required status models
 
@@ -140,6 +145,20 @@ The platform MUST use these canonical values consistently:
 - AI processing status: `not_requested`, `queued`, `processing`, `completed`, `failed`.
 
 Only `approved` resources are visible to visitors. Uploaders MAY view their own pending or rejected resources. Admins MAY view all statuses.
+
+Permitted state transitions are explicit:
+
+| Entity | Transition | Authorized actor and effect |
+| --- | --- | --- |
+| Resource | new -> `pending` | Active uploader through verified finalization only |
+| Resource | `pending`/`rejected`/`removed` -> `approved` | Active admin; clears rejection/removal reason and makes the record public |
+| Resource | `pending` -> `rejected` | Active admin with a reason; remains visible only to owner/admin |
+| Resource | any non-removed -> `removed` | Active admin with a reason; public visibility ends immediately |
+| Resource | `removed`/`rejected` -> permanently deleted | Active admin; R2 deletion succeeds first or remains on a tracked cleanup job |
+| AI job | `queued`/retryable `failed` -> `processing` | Service-role worker with an expiring lock and incremented attempt |
+| AI job | `processing` -> `completed` | Same worker lock; validated output is committed atomically |
+| AI job | `processing` -> `failed` | Same worker lock; sanitized error and bounded backoff are recorded |
+| Account | `active` -> `suspended`/`deleted` | Active admin with reason and audit; protected mutations stop immediately |
 
 ### 5.3 Resource storage metadata
 
@@ -226,7 +245,19 @@ The Public App MUST restore valid sessions, refresh tokens using the supported S
 
 #### PUB-AUTH-006: Account state and deletion
 
-The system MUST define active, suspended, and deleted-account behavior before moderation launches. A suspended user MUST be unable to upload, download, or create new notes while retaining only the access allowed by policy. Account deletion MUST define retention or removal of uploaded resources, private notes, recordings, profile data, and audit records.
+The system MUST define active, suspended, and deleted-account behavior before moderation launches. A suspended user MUST be unable to upload, download, request AI work, or create/update/delete notes. The user MAY read existing private notes while an appeal or export is handled. A deleted account MUST be denied all protected application actions.
+
+The initial deletion policy is a controlled operator workflow rather than an unaudited browser delete:
+
+1. mark the profile `deleted`, revoke active sessions, and block new sessions immediately;
+2. use a 30-day recovery/appeal hold unless law or an approved abuse investigation requires another period;
+3. at the end of the hold, permanently remove private notes and private recording objects;
+4. delete pending/rejected/removed uploads and their R2 objects through tracked cleanup jobs;
+5. retain an approved public resource only when the uploader granted the required redistribution rights, replacing public contributor identity with a neutral label; otherwise delete it;
+6. minimize/pseudonymize profile fields that are no longer required; and
+7. retain security/audit records for the approved compliance period with user identity limited to the stable internal identifier needed for traceability.
+
+Self-service deletion MUST NOT launch until the content-license, recovery, legal-hold, and retention periods are approved. Until then, the Admin App may apply the logical `deleted` state, and an operator must execute and record the final erasure run.
 
 #### PUB-AUTH-007: Authentication abuse controls
 
@@ -487,6 +518,21 @@ The AI adapter MUST return a validated structure:
 
 Prompts MUST limit input size, avoid including unrelated personal data, request structured JSON, and treat document content as untrusted data rather than instructions.
 
+### 8.5 Internal AI worker API
+
+`GET /api/internal/process-ai` (and an equivalent operator `POST`) processes at most one queued PDF job per invocation. It MUST:
+
+- require `Authorization: Bearer <CRON_SECRET>` and reject missing/incorrect secrets before database access;
+- run only in the Node.js server runtime and never expose its service-role credential;
+- claim work transactionally with `FOR UPDATE SKIP LOCKED` semantics and recover stale locks;
+- reject source objects above `AI_MAX_SOURCE_BYTES` and cap extracted pages/input characters;
+- extract PDF text, treating empty/image-only documents as a non-fatal AI failure;
+- validate Gemini JSON output before storage;
+- complete/fail only the job locked by the current worker ID; and
+- return no object key, signed URL, extracted document content, prompt, or provider secret.
+
+The production queue target SHOULD run every five minutes when the selected Vercel plan supports that interval. The repository default is a once-daily UTC schedule so Hobby deployments remain valid; a Pro/Enterprise deployment changes it to `*/5 * * * *` after budget approval. Operators MAY invoke the same endpoint manually with the cron secret for recovery. A single failed AI job MUST NOT change the resource moderation state or delete the upload.
+
 ## 9. Security and privacy requirements
 
 | ID | Requirement |
@@ -560,18 +606,18 @@ This table reflects the repository as reviewed on August 3, 2026. It is a planni
 
 | Area | Current state | Required next state |
 | --- | --- | --- |
-| Public UI | Core pages and styling exist | Connect remaining fixture-backed pages to live data |
-| Authentication | Public registration/login, verification handling, OAuth initiation, recovery/reset, safe return paths, cookie-backed SSR sessions, protected-route middleware, and sign-out are implemented; provider configuration, rate limiting, and browser E2E remain | Verify PUB-AUTH requirements against staging identities and complete abuse controls |
-| Explore/search | Uses in-memory fixture data | Use paginated `search_resources_intelligent` or a corrected database search API |
-| Upload | Direct R2 PUT and resource insert exist | Enforce server validation, shorten URL lifetime, add finalization/object verification and orphan cleanup |
-| AI summary | Route exists but receives title/description text | Extract supported document content, require auth/rate limits, validate output, and process asynchronously |
-| Download | Auth check and presigned GET route exist | Enforce visibility, fix atomic counter permissions, add no-store response and provider checks |
-| Study notes | Database CRUD and temporary MediaRecorder playback exist | Add persistent audio upload if promised; implement actual speech-to-text; replace simulated summary |
-| Database | Core schema, RLS, courses, and merge/search functions exist | Add resource/AI statuses, audit log, admin RLS, secure RPC checks/grants, and merge-collision handling |
-| Admin UI | The project builds and now has sign-in, SSR session refresh, a forbidden state, protected server layout, and sign-out; moderation, audit, R2 deletion, robust errors, and user management remain incomplete | Apply/verify the security migration, move mutations server-side, and complete Phase 2/6 workflows |
+| Public UI | Existing visual system is retained; home, explore, detail, university, leaderboard, dashboard, and upload now use live APIs/RPCs | Capture formal desktop/mobile baselines and run browser/accessibility regression tests |
+| Authentication | Registration/login, verification resend, OAuth initiation, recovery/reset, authenticated password change, SSR session refresh, safe return paths, protected pages, and sign-out are implemented | Verify provider/email configuration, abuse controls, session revocation, and deletion workflow in staging |
+| Explore/search | Paginated `search_resources_v2` and live filters/sorts are integrated; fixture resources are not imported by production pages | Apply migration, benchmark representative data, and verify HTTP/page not-found and RLS behavior |
+| Upload | Server validation, user-scoped 15-minute presign, R2 `HEAD`, transactional finalization, idempotency, and orphan cleanup queue are implemented | Verify R2 CORS/write/head/delete and partial failures from a supported staging runtime |
+| AI summary | Authenticated note summaries and a service-role-only asynchronous PDF extraction worker with validation/retries are implemented | Configure a rotated Gemini key/model/service role/cron secret; run malformed/timeout/image-only tests and cost monitoring |
+| Download | Authenticated, visibility-aware, no-store 15-minute R2 download plus authorization-aware counter RPC is implemented | Apply migration and run visitor/user/owner/admin negative tests against real R2 |
+| Study notes | Owner CRUD, visible autosave, delete confirmation, temporary recording disclosure, capability-detected transcription, and authenticated AI summaries are implemented | Run cross-user RLS/browser tests; persistent audio remains deliberately out of scope until retention is approved |
+| Database | Corrective RBAC and lifecycle/search/audit/cleanup/AI migrations are authored | Apply to fresh and upgrade staging databases; resolve any legacy duplicate aborts; execute the full identity/FK/rollback matrix |
+| Admin UI | Admin SSR gate, live dashboard, audited moderation/merge/edit/reject/user-role/state actions, review downloads, permanent R2+DB deletion, cleanup/AI operations, and visible errors are implemented | Apply migrations and execute browser/RPC negative tests plus cleanup failure injection |
 | Admin authorization | Page middleware/server layout and corrected RLS/RPC migration code exist, but the migration is not deployed and the identity matrix is untested | Apply migration in staging and prove page, route, RLS, and RPC rejection for non-admins |
-| Infrastructure access | Both apps have local public Supabase configuration and live reads work; no migration credential/linked CLI is available; a replacement Cloudflare token is active but its R2 bucket-list call returns HTTP 403; complete R2 S3 credentials are stored locally but endpoint TLS fails before authentication can be tested; the screenshot-derived Gemini key returns HTTP 401 | Provision migration access, resolve and complete the R2 object smoke test from a supported runtime, replace/verify the optional Gemini key, rotate exposed credentials, and configure deployment secrets securely |
-| Metrics | Some live counts exist | Surface query failures and add moderation/AI/audit metrics |
+| Infrastructure access | Public Supabase identifiers exist locally, but no database operator/service-role credential or linked CLI is available. The latest R2 diagnostic fails during TLS negotiation before authentication. No usable Gemini runtime secret is installed. | Rotate all chat/screenshot-exposed credentials, provision migration/service-role access in the correct secret scopes, and repeat R2/Gemini staging diagnostics from Node 20/Vercel |
+| Metrics | Admin dashboard exposes live lifecycle/AI/cleanup counts and recent audit actions | Connect structured logs to production alerting and define latency/backlog/cost thresholds |
 
 ## 13. Risks and open decisions
 
@@ -579,10 +625,10 @@ The following decisions MUST be resolved before implementation of their dependen
 
 1. **Content policy:** allowed materials, copyright reporting/takedown process, prohibited content, and uploader attestation.
 2. **Moderation default:** whether new resources are hidden until approved or visible until flagged. This specification assumes hidden until approved.
-3. **Text extraction:** client-side versus isolated server/worker extraction, supported formats, maximum page count, and OCR policy.
+3. **OCR expansion:** PDF text extraction is selected for release one; decide whether and when image-only PDF OCR is permitted.
 4. **Audio retention:** whether recordings persist, maximum duration/size, storage location, and retention period.
 5. **AI provider/model:** supported model, data-retention terms, cost limits, timeout, and retry policy.
-6. **Deployment target:** hosting provider for each Next.js application and its support for route runtimes and background jobs.
+6. **Vercel plan/cron capacity:** both applications target Vercel; confirm the selected plan supports the five-minute cron and required function duration/concurrency.
 7. **Regional/privacy requirements:** target user regions, minimum age, account deletion, and retention obligations.
 8. **Legacy Supabase Storage:** whether old `file_path`/`file_url` records remain supported during R2 migration and for how long.
 

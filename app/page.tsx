@@ -1,7 +1,7 @@
 'use client';
 
 import { motion, useScroll, useTransform } from 'framer-motion';
-import { useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import {
   Search,
@@ -23,7 +23,11 @@ import {
 import { Button } from '@/components/ui/button';
 import { AnimatedCounter } from '@/components/animated-counter';
 import { ResourceCard, CategoryIcon, formatCount } from '@/components/resource-card';
-import { resources, universities, contributors, categories, stats, badges } from '@/lib/data';
+import type { PublicContributor, Resource, UniversitySummary } from '@/lib/catalog-types';
+import { achievementDefinitions } from '@/lib/gamification';
+
+type HomeCategory = { id: string; name: string; icon: string; description: string; count: number };
+type PlatformStats = { resources: number; students: number; universities: number; downloads: number };
 
 export default function HomePage() {
   const heroRef = useRef<HTMLDivElement>(null);
@@ -34,8 +38,43 @@ export default function HomePage() {
   const heroY = useTransform(scrollYProgress, [0, 1], [0, 150]);
   const heroOpacity = useTransform(scrollYProgress, [0, 0.8], [1, 0]);
   const meshY = useTransform(scrollYProgress, [0, 1], [0, 100]);
+  const [trending, setTrending] = useState<Resource[]>([]);
+  const [universities, setUniversities] = useState<UniversitySummary[]>([]);
+  const [contributors, setContributors] = useState<PublicContributor[]>([]);
+  const [categories, setCategories] = useState<HomeCategory[]>([]);
+  const [platformStats, setPlatformStats] = useState<PlatformStats>({ resources: 0, students: 0, universities: 0, downloads: 0 });
+  const [homeLoading, setHomeLoading] = useState(true);
+  const [homeError, setHomeError] = useState('');
+  const [retryKey, setRetryKey] = useState(0);
 
-  const trending = resources.filter((r) => r.trending).slice(0, 6);
+  useEffect(() => {
+    const controller = new AbortController();
+    setHomeLoading(true);
+    setHomeError('');
+    fetch('/api/home', { signal: controller.signal, cache: 'no-store' })
+      .then(async (response) => {
+        const body = await response.json();
+        if (!response.ok) throw new Error(body.error?.message ?? 'Live platform information could not be loaded.');
+        setTrending(body.resources ?? []);
+        setUniversities(body.universities ?? []);
+        setContributors(body.contributors ?? []);
+        setCategories(body.categories ?? []);
+        setPlatformStats(body.stats ?? { resources: 0, students: 0, universities: 0, downloads: 0 });
+      })
+      .catch((fetchError) => {
+        if (fetchError instanceof DOMException && fetchError.name === 'AbortError') return;
+        setHomeError(fetchError instanceof Error ? fetchError.message : 'Live platform information could not be loaded.');
+      })
+      .finally(() => { if (!controller.signal.aborted) setHomeLoading(false); });
+    return () => controller.abort();
+  }, [retryKey]);
+
+  const stats = [
+    { label: 'Approved resources', value: platformStats.resources, suffix: '', display: formatCount(platformStats.resources) },
+    { label: 'Students', value: platformStats.students, suffix: '', display: formatCount(platformStats.students) },
+    { label: 'Universities', value: platformStats.universities, suffix: '', display: formatCount(platformStats.universities) },
+    { label: 'Downloads', value: platformStats.downloads, suffix: '', display: formatCount(platformStats.downloads) },
+  ];
 
   return (
     <div className="overflow-hidden">
@@ -92,7 +131,7 @@ export default function HomePage() {
           >
             <span className="flex h-2 w-2 rounded-full bg-success animate-pulse-glow" />
             <Sparkles className="h-3.5 w-3.5 text-primary" />
-            120,000+ resources shared by students
+            {homeLoading ? 'Loading live community totals…' : `${formatCount(platformStats.resources)} approved resources shared by students`}
           </motion.div>
 
           <motion.h1
@@ -167,11 +206,20 @@ export default function HomePage() {
               <Zap className="h-4 w-4 text-accent" /> Instant downloads
             </span>
             <span className="inline-flex items-center gap-1.5">
-              <Globe className="h-4 w-4 text-primary" /> 250+ universities
+              <Globe className="h-4 w-4 text-primary" /> {formatCount(platformStats.universities)} universities
             </span>
           </motion.div>
         </motion.div>
       </section>
+
+      {homeError && (
+        <div className="mx-auto mt-8 max-w-3xl px-4" role="alert">
+          <div className="rounded-2xl border border-destructive/30 bg-destructive/5 p-4 text-center text-sm text-muted-foreground">
+            {homeError}{' '}
+            <button className="font-semibold text-primary underline" onClick={() => setRetryKey((value) => value + 1)}>Try again</button>
+          </div>
+        </div>
+      )}
 
       {/* ===== STATS ===== */}
       <section className="relative z-10 mx-auto max-w-7xl px-4">
@@ -254,7 +302,7 @@ export default function HomePage() {
       <section className="mx-auto mt-32 max-w-7xl px-4">
         <SectionHeading
           eyebrow="Global community"
-          title="250+ universities, one platform"
+          title={`${formatCount(platformStats.universities)} universities, one platform`}
           subtitle="Explore resources from top universities around the world."
         />
         <div className="mt-10 grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
@@ -292,13 +340,6 @@ export default function HomePage() {
                       <div className="text-xs text-muted-foreground">Departments</div>
                     </div>
                   </div>
-                  <div className="mt-4 flex flex-wrap gap-1.5">
-                    {uni.popularSubjects.slice(0, 3).map((s) => (
-                      <span key={s} className="rounded-lg bg-muted px-2.5 py-1 text-xs text-muted-foreground">
-                        {s}
-                      </span>
-                    ))}
-                  </div>
                 </div>
               </Link>
             </motion.div>
@@ -325,7 +366,7 @@ export default function HomePage() {
               align="left"
             />
             <div className="mt-8 grid grid-cols-2 gap-3">
-              {badges.map((badge, i) => (
+              {achievementDefinitions.map((badge, i) => (
                 <motion.div
                   key={badge.name}
                   initial={{ opacity: 0, scale: 0.9 }}
@@ -349,8 +390,8 @@ export default function HomePage() {
           <div>
             <SectionHeading
               eyebrow="Top contributors"
-              title="This month's leaders"
-              subtitle="The most active members of the community."
+              title="All-time leaders"
+              subtitle="The highest-ranked members of the live community leaderboard."
               align="left"
             />
             <div className="mt-8 space-y-3">

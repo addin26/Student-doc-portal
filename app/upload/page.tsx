@@ -14,7 +14,6 @@ import {
   Plus,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { categories } from '@/lib/data';
 import { supabase } from '@/lib/supabase';
 import { cn } from '@/lib/utils';
 
@@ -37,14 +36,24 @@ interface DbCourse {
   status: string;
 }
 
-function getFileType(filename: string): string {
-  const ext = filename.split('.').pop()?.toLowerCase() ?? '';
-  const map: Record<string, string> = {
-    pdf: 'pdf', ppt: 'ppt', pptx: 'ppt', docx: 'docx', zip: 'zip',
-    png: 'img', jpg: 'img', jpeg: 'img', gif: 'img', webp: 'img',
-    xlsx: 'xlsx', xls: 'xlsx', mp4: 'video', webm: 'video', mov: 'video',
+interface DbCategory {
+  id: string;
+  name: string;
+}
+
+function inferContentType(file: File) {
+  if (file.type) return file.type;
+  const extension = file.name.split('.').pop()?.toLowerCase() ?? '';
+  const types: Record<string, string> = {
+    pdf: 'application/pdf', ppt: 'application/vnd.ms-powerpoint',
+    pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    zip: 'application/zip', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
+    gif: 'image/gif', webp: 'image/webp', xls: 'application/vnd.ms-excel',
+    xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime',
   };
-  return map[ext] ?? 'pdf';
+  return types[extension] ?? 'application/octet-stream';
 }
 
 function formatFileSize(bytes: number): string {
@@ -60,12 +69,15 @@ export default function UploadPage() {
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadStage, setUploadStage] = useState('Preparing upload…');
   const [submitted, setSubmitted] = useState(false);
+  const [submittedResourceId, setSubmittedResourceId] = useState('');
   const [error, setError] = useState('');
 
   // DB reference lists
   const [universitiesList, setUniversitiesList] = useState<DbUniversity[]>([]);
   const [coursesList, setCoursesList] = useState<DbCourse[]>([]);
+  const [categoriesList, setCategoriesList] = useState<DbCategory[]>([]);
   
   // Custom dialogs state
   const [showAddUniDialog, setShowAddUniDialog] = useState(false);
@@ -102,12 +114,12 @@ export default function UploadPage() {
       }
       setAuthChecked(true);
 
-      // Load universities
-      const { data: unis } = await supabase
-        .from('universities')
-        .select('id, name, short, status')
-        .order('name');
+      const [{ data: unis }, { data: categoryData }] = await Promise.all([
+        supabase.from('universities').select('id, name, short, status').order('name'),
+        supabase.from('categories').select('id, name').order('name'),
+      ]);
       if (unis) setUniversitiesList(unis);
+      if (categoryData) setCategoriesList(categoryData);
     })();
   }, [router]);
 
@@ -223,6 +235,7 @@ export default function UploadPage() {
     }
     setError('');
     setUploading(true);
+    setUploadStage('Preparing secure upload…');
     setUploadProgress(10);
 
     try {
@@ -232,7 +245,7 @@ export default function UploadPage() {
         return;
       }
       const token = session.access_token;
-      const userId = session.user.id;
+      const contentType = inferContentType(file);
 
       // 1. Get Cloudflare R2 Presigned Upload URL
       const presignedRes = await fetch('/api/upload/presigned-url', {
@@ -243,7 +256,7 @@ export default function UploadPage() {
         },
         body: JSON.stringify({
           fileName: file.name,
-          contentType: file.type || 'application/octet-stream',
+          contentType,
           sizeBytes: file.size,
         }),
       });
@@ -253,15 +266,16 @@ export default function UploadPage() {
         throw new Error(errJson.error?.message || 'Could not prepare upload session.');
       }
 
-      const { uploadUrl, storageKey, storageProvider, requiredHeaders } = await presignedRes.json();
+      const { uploadUrl, storageKey, requiredHeaders } = await presignedRes.json();
 
       setUploadProgress(30);
+      setUploadStage('Uploading file to private storage…');
 
       // 2. Upload file directly to Cloudflare R2 via Presigned PUT URL
       const r2UploadRes = await fetch(uploadUrl, {
         method: 'PUT',
         headers: requiredHeaders || {
-          'Content-Type': file.type || 'application/octet-stream',
+          'Content-Type': contentType,
         },
         body: file,
       });
@@ -271,74 +285,44 @@ export default function UploadPage() {
       }
 
       setUploadProgress(70);
-
-      // 3. AI Document Summarization with Gemini Flash
-      let aiSummary = '';
-      let aiTopics: string[] = [];
-      try {
-        const aiRes = await fetch('/api/ai/summarize', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({
-            documentText: `${form.title}. ${form.description}. Category: ${form.category}`,
-            title: form.title,
-          }),
-        });
-        if (aiRes.ok) {
-          const aiJson = await aiRes.json();
-          aiSummary = aiJson.summary;
-          aiTopics = aiJson.suggestedTags || [];
-        }
-      } catch (aiErr) {
-        console.warn('AI summary background process skipped:', aiErr);
-      }
-
-      setUploadProgress(90);
-
-      // Find category id
-      let categoryId: string | null = null;
-      if (form.category) {
-        const { data: catData } = await supabase
-          .from('categories')
-          .select('id')
-          .eq('name', form.category)
-          .maybeSingle();
-        categoryId = catData?.id ?? null;
-      }
+      setUploadStage('Verifying file and finalizing metadata…');
 
       const userTags = form.tags
         .split(',')
         .map((t) => t.trim().toLowerCase())
         .filter(Boolean);
-      const combinedTags = Array.from(new Set([...userTags, ...aiTopics]));
-
-      // 4. Create Resource record in Supabase Database
-      const { error: dbError } = await supabase.from('resources').insert({
-        title: form.title,
-        description: form.description,
-        university_id: form.universityId || null,
-        course_id: form.courseId || null,
-        department: form.department,
-        course_code: form.courseCode,
-        semester: form.semester,
-        subject: form.subject,
-        file_type: getFileType(file.name),
-        file_size: formatFileSize(file.size),
-        storage_provider: storageProvider || 'r2',
-        storage_key: storageKey,
-        ai_summary: aiSummary,
-        ai_topics: aiTopics,
-        tags: combinedTags,
-        category_id: categoryId,
-        uploader_id: userId,
+      const finalizeRes = await fetch('/api/upload/finalize', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          storageKey,
+          fileName: file.name,
+          contentType,
+          sizeBytes: file.size,
+          title: form.title,
+          description: form.description,
+          universityId: form.universityId,
+          courseId: form.courseId,
+          categoryId: form.category || null,
+          department: form.department,
+          courseCode: form.courseCode,
+          semester: form.semester,
+          subject: form.subject,
+          tags: userTags,
+        }),
       });
-
-      if (dbError) throw dbError;
+      if (!finalizeRes.ok) {
+        const finalizeError = await finalizeRes.json();
+        throw new Error(finalizeError.error?.message || 'The uploaded file could not be finalized.');
+      }
+      const finalized = await finalizeRes.json();
 
       setUploadProgress(100);
+      setUploadStage('Upload finalized and awaiting moderation.');
+      setSubmittedResourceId(finalized.resourceId || '');
       setSubmitted(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Upload failed. Please try again.');
@@ -351,6 +335,8 @@ export default function UploadPage() {
     setSubmitted(false);
     setFile(null);
     setUploadProgress(0);
+    setUploadStage('Preparing upload…');
+    setSubmittedResourceId('');
     setError('');
     setForm({ title: '', universityId: '', department: '', courseId: '', courseCode: '', semester: '', subject: '', category: '', description: '', tags: '' });
   };
@@ -391,12 +377,14 @@ export default function UploadPage() {
             </motion.div>
             <h2 className="mt-6 font-display text-2xl font-bold">Upload complete!</h2>
             <p className="mt-2 max-w-md text-muted-foreground">
-              Your resource has been uploaded to Cloudflare R2 and summarized by Gemini AI. You earned +50 XP.
+              Your file was verified in Cloudflare R2 and its resource record is awaiting moderation. Supported PDFs are queued for AI processing when Gemini is configured. You earned +50 XP.
             </p>
             <div className="mt-6 flex gap-3">
               <Button className="rounded-xl" onClick={resetForm}>Upload another</Button>
               <Button variant="outline" className="rounded-xl" asChild>
-                <a href="/explore">View on explore</a>
+                <a href={submittedResourceId ? `/resource/${submittedResourceId}` : '/dashboard'}>
+                  View upload status
+                </a>
               </Button>
             </div>
           </motion.div>
@@ -479,6 +467,7 @@ export default function UploadPage() {
               <Field label="University" required>
                 <div className="flex gap-2">
                   <select
+                    required
                     value={form.universityId}
                     onChange={(e) => update('universityId', e.target.value)}
                     className="filter-select flex-1"
@@ -507,6 +496,7 @@ export default function UploadPage() {
               <Field label="Course & Short Code" required>
                 <div className="flex gap-2">
                   <select
+                    required
                     value={form.courseId}
                     disabled={!form.universityId}
                     onChange={(e) => {
@@ -562,8 +552,8 @@ export default function UploadPage() {
               <Field label="Category" full>
                 <select value={form.category} onChange={(e) => update('category', e.target.value)} className="filter-select">
                   <option value="">Select category</option>
-                  {categories.map((c) => (
-                    <option key={c.id} value={c.name}>{c.name}</option>
+                  {categoriesList.map((c) => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
                   ))}
                 </select>
               </Field>
@@ -592,9 +582,9 @@ export default function UploadPage() {
             <div className="flex items-start gap-3 rounded-2xl border border-primary/20 bg-primary/5 p-4">
               <Sparkles className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
               <div>
-                <p className="text-sm font-semibold text-primary">Gemini 1.5/2.0 Flash AI Auto-Summarizer</p>
+                <p className="text-sm font-semibold text-primary">Optional Gemini AI enrichment</p>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  Your document will be stored securely on Cloudflare R2 and summarized automatically by Gemini Flash.
+                  The upload succeeds independently of AI. Supported PDFs are queued after storage verification when a Gemini model is configured.
                 </p>
               </div>
             </div>
@@ -608,7 +598,7 @@ export default function UploadPage() {
                 <div className="flex items-center justify-between text-sm">
                   <span className="flex items-center gap-2 font-medium">
                     <Loader2 className="h-4 w-4 animate-spin text-primary" />
-                    Uploading to Cloudflare R2 & Generating AI Summary...
+                    {uploadStage}
                   </span>
                   <span className="tabular-nums text-muted-foreground">{uploadProgress}%</span>
                 </div>

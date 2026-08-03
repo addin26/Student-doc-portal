@@ -20,34 +20,74 @@ import {
   Loader2,
   Sparkles,
 } from 'lucide-react';
-import { resources } from '@/lib/data';
-import { FILE_TYPE_META } from '@/lib/data';
-import { ResourceCard, formatCount } from '@/components/resource-card';
+import { FILE_TYPE_META, type Resource } from '@/lib/catalog-types';
+import { formatCount } from '@/components/resource-card';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 
-const mockComments = [
-  { id: '1', name: 'Priya Nair', avatar: 'PN', time: '2 days ago', text: 'This is incredibly well-organized. The section on neural networks saved me hours of studying. Thank you!', likes: 24, verified: true },
-  { id: '2', name: 'Marcus Lee', avatar: 'ML', time: '4 days ago', text: 'Could you share the problem set solutions as a separate file? Would be super helpful.', likes: 8, verified: false },
-  { id: '3', name: 'Ana Costa', avatar: 'AC', time: '1 week ago', text: 'Used this for my exam prep and got an A. Highly recommend!', likes: 41, verified: true },
-];
+type ResourceComment = {
+  id: string;
+  name: string;
+  avatar: string;
+  time: string;
+  text: string;
+  likes: number;
+  verified: boolean;
+};
+
+// Comments are not part of the current persisted domain model. Keeping this
+// collection empty prevents demonstration identities from appearing in a
+// production resource view.
+const resourceComments: ResourceComment[] = [];
 
 export default function ResourceDetailPage() {
   const params = useParams();
   const router = useRouter();
   const id = params?.id as string;
-  const resource = resources.find((r) => r.id === id) ?? resources[0];
-  const ft = FILE_TYPE_META[resource.fileType];
-  const related = resources.filter((r) => r.id !== resource.id && r.category === resource.category).slice(0, 3);
-
+  const [resource, setResource] = useState<Resource | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [bookmarked, setBookmarked] = useState(false);
   const [commentText, setCommentText] = useState('');
   const [downloading, setDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState('');
 
+  useEffect(() => {
+    const controller = new AbortController();
+    setLoading(true);
+    setLoadError('');
+
+    fetch(`/api/resources/${encodeURIComponent(id)}`, {
+      signal: controller.signal,
+      cache: 'no-store',
+    })
+      .then(async (response) => {
+        const body = await response.json();
+        if (!response.ok) {
+          throw new Error(
+            response.status === 404
+              ? 'This resource does not exist or is not available to you.'
+              : body.error?.message ?? 'Resource details could not be loaded.',
+          );
+        }
+        setResource(body.resource);
+      })
+      .catch((fetchError) => {
+        if (fetchError instanceof DOMException && fetchError.name === 'AbortError') return;
+        setResource(null);
+        setLoadError(fetchError instanceof Error ? fetchError.message : 'Resource details could not be loaded.');
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false);
+      });
+
+    return () => controller.abort();
+  }, [id]);
+
   const handleDownload = async () => {
+    if (!resource) return;
     setDownloadError('');
     setDownloading(true);
 
@@ -84,6 +124,32 @@ export default function ResourceDetailPage() {
       setDownloading(false);
     }
   };
+
+  if (loading) {
+    return (
+      <div className="mx-auto flex min-h-[50vh] max-w-7xl items-center justify-center px-4 py-8" aria-label="Loading resource">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  if (!resource) {
+    return (
+      <div className="mx-auto max-w-3xl px-4 py-20 text-center" role="alert">
+        <div className="rounded-3xl border border-border bg-card p-10 shadow-soft">
+          <h1 className="font-display text-2xl font-bold">Resource unavailable</h1>
+          <p className="mt-3 text-sm text-muted-foreground">
+            {loadError || 'This resource does not exist or is no longer visible.'}
+          </p>
+          <Button className="mt-6 rounded-xl" asChild>
+            <Link href="/explore">Return to explore</Link>
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  const ft = FILE_TYPE_META[resource.fileType] ?? FILE_TYPE_META.pdf;
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-8">
@@ -136,7 +202,7 @@ export default function ResourceDetailPage() {
                 {resource.tags.map((tag) => (
                   <Link
                     key={tag}
-                    href={`/explore?category=${tag}`}
+                    href={`/explore?q=${encodeURIComponent(tag)}`}
                     className="rounded-lg bg-muted px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary"
                   >
                     #{tag}
@@ -149,17 +215,26 @@ export default function ResourceDetailPage() {
             <div className="mt-8 rounded-3xl border border-primary/20 bg-gradient-to-br from-primary/5 via-card to-card p-6 shadow-soft">
               <div className="flex items-center gap-2 font-display text-lg font-bold text-primary">
                 <Sparkles className="h-5 w-5" />
-                Gemini AI Executive Summary
+                AI-generated summary
               </div>
               <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
-                This document provides comprehensive coverage of key concepts, formulas, and structural problem sets. Recommended for exam preparation and quick review.
+                {resource.aiSummary
+                  ? resource.aiSummary
+                  : resource.aiStatus === 'processing' || resource.aiStatus === 'queued'
+                    ? 'Summary generation is in progress.'
+                    : 'No AI summary is available for this resource.'}
               </p>
+              {resource.aiSummary && (
+                <p className="mt-3 text-xs text-muted-foreground">
+                  AI-generated content can contain errors. Verify important details against the original document.
+                </p>
+              )}
             </div>
 
             {/* comments */}
             <div className="mt-8">
               <h2 className="font-display text-lg font-semibold">
-                Comments <span className="text-muted-foreground">({mockComments.length})</span>
+                Comments <span className="text-muted-foreground">({resourceComments.length})</span>
               </h2>
               <div className="mt-4 rounded-2xl border border-border bg-card p-4 shadow-soft">
                 <div className="flex gap-3">
@@ -170,13 +245,14 @@ export default function ResourceDetailPage() {
                     <textarea
                       value={commentText}
                       onChange={(e) => setCommentText(e.target.value)}
-                      placeholder="Write a comment..."
+                      placeholder="Comments are not enabled yet."
+                      disabled
                       className="h-20 w-full resize-none rounded-xl border border-border bg-background px-4 py-3 text-sm outline-none transition-all focus:border-primary focus:ring-2 focus:ring-primary/20"
                     />
                     <div className="mt-2 flex justify-end">
-                      <Button size="sm" className="rounded-xl" disabled={!commentText.trim()}>
+                      <Button size="sm" className="rounded-xl" disabled>
                         <Send className="mr-1.5 h-3.5 w-3.5" />
-                        Post
+                        Unavailable
                       </Button>
                     </div>
                   </div>
@@ -184,7 +260,7 @@ export default function ResourceDetailPage() {
               </div>
 
               <div className="mt-4 space-y-4">
-                {mockComments.map((c, i) => (
+                {resourceComments.map((c, i) => (
                   <motion.div
                     key={c.id}
                     initial={{ opacity: 0, y: 15 }}

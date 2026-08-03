@@ -1,4 +1,10 @@
-import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
+import {
+  DeleteObjectCommand,
+  GetObjectCommand,
+  HeadObjectCommand,
+  PutObjectCommand,
+  S3Client,
+} from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 function getR2Config() {
@@ -29,15 +35,52 @@ function getR2Config() {
 /**
  * Generate a presigned upload URL for direct client-to-R2 upload
  */
-export async function getR2UploadPresignedUrl(key: string, contentType: string, expiresInSeconds = 900): Promise<string> {
+export async function getR2UploadPresignedUrl(
+  key: string,
+  contentType: string,
+  expiresInSeconds = 900,
+  checksumSha256?: string,
+): Promise<string> {
   const { client, bucketName } = getR2Config();
   const command = new PutObjectCommand({
     Bucket: bucketName,
     Key: key,
     ContentType: contentType,
+    ChecksumSHA256: checksumSha256,
   });
 
   return await getSignedUrl(client, command, { expiresIn: expiresInSeconds });
+}
+
+export async function headR2Object(key: string) {
+  const { client, bucketName } = getR2Config();
+  const response = await client.send(new HeadObjectCommand({ Bucket: bucketName, Key: key }));
+  return {
+    contentLength: response.ContentLength,
+    contentType: response.ContentType,
+    checksumSha256: response.ChecksumSHA256,
+    etag: response.ETag,
+  };
+}
+
+export async function deleteR2Object(key: string) {
+  const { client, bucketName } = getR2Config();
+  await client.send(new DeleteObjectCommand({ Bucket: bucketName, Key: key }));
+}
+
+export async function getR2ObjectBytes(key: string, maximumBytes: number) {
+  const metadata = await headR2Object(key);
+  if (!metadata.contentLength || metadata.contentLength > maximumBytes) {
+    throw new Error('R2_OBJECT_SIZE_UNSUPPORTED');
+  }
+
+  const { client, bucketName } = getR2Config();
+  const response = await client.send(new GetObjectCommand({ Bucket: bucketName, Key: key }));
+  if (!response.Body) throw new Error('R2_OBJECT_BODY_MISSING');
+
+  const bytes = await response.Body.transformToByteArray();
+  if (bytes.byteLength > maximumBytes) throw new Error('R2_OBJECT_SIZE_UNSUPPORTED');
+  return Buffer.from(bytes);
 }
 
 /**

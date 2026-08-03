@@ -1,7 +1,7 @@
 import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 
-const protectedPrefixes = ['/dashboard', '/upload', '/study-notes'];
+const protectedPrefixes = ['/dashboard', '/upload', '/study-notes', '/account'];
 
 function copyAuthState(source: NextResponse, target: NextResponse) {
   source.cookies.getAll().forEach((cookie) => target.cookies.set(cookie));
@@ -12,7 +12,7 @@ function copyAuthState(source: NextResponse, target: NextResponse) {
   return target;
 }
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   let response = NextResponse.next({ request });
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;

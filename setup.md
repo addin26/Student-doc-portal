@@ -24,12 +24,13 @@ and public site URL. R2 and Gemini credentials are server-only.
 - A Supabase project with the migrations in `supabase/migrations/` applied.
 - A private Cloudflare R2 bucket and an Object Read & Write S3 credential pair.
 - A production domain or the Vercel project domain.
-- An optional Gemini API key. Leave AI disabled until a valid key, model, and
-  budget policy are approved.
+- For AI processing: a rotated Gemini key/model, a Supabase service-role key,
+  and a generated cron secret. Leave AI disabled unless all are approved.
 
 Database migration access is separate from application access. Do not add a
-Supabase database password, access token, or service-role key to this Vercel
-project merely to deploy the web application.
+database password or migration token to Vercel. A service-role key is required
+only for the internal AI worker and must remain server-only; omit it when AI is
+disabled.
 
 ## 3. Import the project into Vercel
 
@@ -72,6 +73,7 @@ data.
 | `CLOUDFLARE_R2_SECRET_ACCESS_KEY` | Server only, sensitive | R2 S3 Secret Access Key |
 | `CLOUDFLARE_R2_ENDPOINT` | Server only | `https://<account-id>.r2.cloudflarestorage.com` |
 | `CLOUDFLARE_R2_BUCKET_NAME` | Server only | Private bucket name |
+| `UPLOAD_MAX_BYTES` | Server only | Maximum accepted upload size in bytes; initial production value is `104857600` |
 
 Do not configure a Cloudflare management API token in the application. It is
 not the same as the R2 S3 Secret Access Key and cannot sign S3 requests.
@@ -80,11 +82,25 @@ not the same as the R2 S3 Secret Access Key and cannot sign S3 requests.
 
 | Variable | Description |
 | --- | --- |
+| `SUPABASE_SERVICE_ROLE_KEY` | Server-only key required only by `/api/internal/process-ai`; never import into client code |
 | `GEMINI_API_KEY` | Gemini API key used only by server-side AI processing |
 | `GEMINI_MODEL` | Approved model name after AI processing is enabled |
+| `CRON_SECRET` | Random server-only value of at least 32 characters; Vercel sends it as the cron Bearer credential |
+| `AI_MAX_SOURCE_BYTES` | Maximum PDF bytes the worker reads; initial value `15728640` (15 MiB), hard-capped by code at 25 MiB |
 
-If `GEMINI_API_KEY` is absent, the deployment must remain usable without AI
-analysis. Do not enter placeholder text as a secret value.
+AI is enabled only when both Gemini values are present. The worker additionally
+requires the service-role key and cron secret. If any are intentionally absent,
+uploads and moderation remain usable and PDFs finalize with AI not requested.
+Do not enter placeholder text as a secret value.
+
+### Vercel cron plan choice
+
+The checked-in `vercel.json` runs at `02:00 UTC` once daily, which is valid on
+all Vercel plans. Vercel Hobby currently rejects schedules that run more than
+once per day. For a production Pro/Enterprise project, change the schedule to
+`*/5 * * * *` after approving Gemini cost and queue monitoring. Cron invokes
+production deployments only; Preview testing must call the endpoint manually
+with `Authorization: Bearer <CRON_SECRET>`.
 
 ## 5. Supabase configuration
 
@@ -183,6 +199,8 @@ use `NEXT_PUBLIC_SITE_URL` for the canonical production origin.
 - [ ] Private notes are inaccessible to a second test user.
 - [ ] Server logs contain no JWTs, signed URLs, reset tokens, or secrets.
 - [ ] AI absence/failure does not break upload or resource viewing.
+- [ ] An authorized worker call processes one queued PDF; a wrong cron secret returns 401.
+- [ ] Image-only/oversized PDFs fail AI safely and remain valid uploads.
 
 ## 9. Rollback and secret rotation
 
@@ -200,5 +218,7 @@ use `NEXT_PUBLIC_SITE_URL` for the canonical production origin.
 - Supabase redirect URLs: <https://supabase.com/docs/guides/auth/redirect-urls>
 - Supabase deployment: <https://supabase.com/docs/guides/deployment>
 - Vercel environment variables: <https://vercel.com/docs/environment-variables>
+- Vercel cron management: <https://vercel.com/docs/cron-jobs/manage-cron-jobs>
+- Vercel cron plan limits: <https://vercel.com/docs/cron-jobs/usage-and-pricing>
 - Cloudflare R2 S3 API: <https://developers.cloudflare.com/r2/api/s3/api/>
 - Cloudflare R2 CORS: <https://developers.cloudflare.com/r2/buckets/cors/>

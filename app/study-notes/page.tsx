@@ -19,7 +19,6 @@ import {
   FileText,
   Loader2,
   Download,
-  Lock,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -34,6 +33,32 @@ type Note = {
   hasRecording?: boolean;
   summary?: string;
 };
+
+interface SpeechRecognitionLike {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  start(): void;
+  stop(): void;
+  onresult: ((event: {
+    resultIndex: number;
+    results: {
+      length: number;
+      [index: number]: { isFinal: boolean; 0: { transcript: string } };
+    };
+  }) => void) | null;
+  onerror: ((event: { error: string }) => void) | null;
+  onend: (() => void) | null;
+}
+
+type SpeechRecognitionConstructor = new () => SpeechRecognitionLike;
+
+declare global {
+  interface Window {
+    SpeechRecognition?: SpeechRecognitionConstructor;
+    webkitSpeechRecognition?: SpeechRecognitionConstructor;
+  }
+}
 
 export default function StudyNotesPage() {
   const router = useRouter();
@@ -50,13 +75,23 @@ export default function StudyNotesPage() {
   const [copied, setCopied] = useState(false);
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [noteError, setNoteError] = useState('');
+  const [speechSupported, setSpeechSupported] = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false);
+  const [interimTranscript, setInterimTranscript] = useState('');
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const audioPlayerRef = useRef<HTMLAudioElement | null>(null);
+  const audioUrlsRef = useRef<Record<string, string>>({});
+  const recordingSecondsRef = useRef(0);
+  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const activeNote = notes.find((n) => n.id === activeNoteId) ?? null;
+  const autosaveNoteId = activeNote?.id;
+  const autosaveTitle = activeNote?.title;
+  const autosaveContent = activeNote?.content;
 
   // Auth gate + initial load
   useEffect(() => {
@@ -89,8 +124,8 @@ export default function StudyNotesPage() {
       title: n.title,
       content: n.content,
       date: new Date(n.updated_at).toISOString().split('T')[0],
-      hasRecording: n.has_recording,
-      duration: n.recording_duration,
+      hasRecording: false,
+      duration: undefined,
       summary: n.summary,
     }));
 
@@ -105,6 +140,26 @@ export default function StudyNotesPage() {
   const updateNoteLocal = (id: string, patch: Partial<Note>) => {
     setNotes((prev) => prev.map((n) => (n.id === id ? { ...n, ...patch } : n)));
   };
+
+  useEffect(() => {
+    if (!authChecked || loading || !autosaveNoteId) return;
+    const timer = window.setTimeout(async () => {
+      setSaving(true);
+      setSaved(false);
+      setNoteError('');
+      const { error } = await supabase
+        .from('study_notes')
+        .update({ title: autosaveTitle ?? '', content: autosaveContent ?? '' })
+        .eq('id', autosaveNoteId);
+      setSaving(false);
+      if (error) {
+        setNoteError('Autosave failed. Your latest text remains in this browser tab; try saving again.');
+      } else {
+        setSaved(true);
+      }
+    }, 900);
+    return () => window.clearTimeout(timer);
+  }, [authChecked, autosaveContent, autosaveNoteId, autosaveTitle, loading]);
 
   const createNote = async () => {
     const { data, error } = await supabase
@@ -130,6 +185,8 @@ export default function StudyNotesPage() {
   };
 
   const deleteNote = async (id: string) => {
+    const note = notes.find((item) => item.id === id);
+    if (!window.confirm(`Delete “${note?.title || 'Untitled note'}”? This cannot be undone.`)) return;
     const { error } = await supabase.from('study_notes').delete().eq('id', id);
     if (error) {
       alert('Could not delete note. Please try again.');
@@ -151,20 +208,19 @@ export default function StudyNotesPage() {
   const handleSave = async () => {
     if (!activeNote) return;
     setSaving(true);
+    setNoteError('');
     const { error } = await supabase
       .from('study_notes')
       .update({
         title: activeNote.title,
         content: activeNote.content,
         summary: summary || null,
-        has_recording: activeNote.hasRecording ?? false,
-        recording_duration: activeNote.duration ?? null,
       })
       .eq('id', activeNote.id);
 
     setSaving(false);
     if (error) {
-      alert('Could not save note. Please try again.');
+      setNoteError('Could not save this note. Please try again.');
       return;
     }
     setSaved(true);
@@ -193,17 +249,14 @@ export default function StudyNotesPage() {
       recorder.onstop = () => {
         const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
         const url = URL.createObjectURL(blob);
-        setAudioUrls((prev) => ({ ...prev, [activeNoteId]: url }));
-        const duration = formatTime(recordingTime);
+        setAudioUrls((prev) => {
+          if (prev[activeNoteId]) URL.revokeObjectURL(prev[activeNoteId]);
+          const next = { ...prev, [activeNoteId]: url };
+          audioUrlsRef.current = next;
+          return next;
+        });
+        const duration = formatTime(recordingSecondsRef.current);
         updateNoteLocal(activeNoteId, { hasRecording: true, duration });
-        // persist recording metadata
-        supabase
-          .from('study_notes')
-          .update({ has_recording: true, recording_duration: duration })
-          .eq('id', activeNoteId)
-          .then(({ error }) => {
-            if (error) console.error('Failed to save recording metadata:', error.message);
-          });
         streamRef.current?.getTracks().forEach((t) => t.stop());
       };
 
@@ -211,13 +264,15 @@ export default function StudyNotesPage() {
       mediaRecorderRef.current = recorder;
       setIsRecording(true);
       setRecordingTime(0);
+      recordingSecondsRef.current = 0;
       timerRef.current = setInterval(() => {
-        setRecordingTime((t) => t + 1);
+        recordingSecondsRef.current += 1;
+        setRecordingTime(recordingSecondsRef.current);
       }, 1000);
     } catch {
       alert('Could not access microphone. Please allow microphone permissions and try again.');
     }
-  }, [activeNoteId, recordingTime]);
+  }, [activeNoteId]);
 
   const stopRecording = useCallback(() => {
     mediaRecorderRef.current?.stop();
@@ -242,27 +297,91 @@ export default function StudyNotesPage() {
     }
   };
 
+  const startTranscription = () => {
+    if (!activeNoteId) return;
+    const Recognition = window.SpeechRecognition ?? window.webkitSpeechRecognition;
+    if (!Recognition) {
+      setNoteError('Live transcription is not supported in this browser. You can continue typing notes manually.');
+      return;
+    }
+
+    setNoteError('');
+    const recognition = new Recognition();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = navigator.language || 'en-US';
+    recognition.onresult = (event) => {
+      let finalText = '';
+      let interimText = '';
+      for (let index = event.resultIndex; index < event.results.length; index += 1) {
+        const result = event.results[index];
+        if (result.isFinal) finalText += result[0].transcript;
+        else interimText += result[0].transcript;
+      }
+      setInterimTranscript(interimText.trim());
+      if (finalText.trim()) {
+        setNotes((current) => current.map((note) => note.id === activeNoteId
+          ? { ...note, content: `${note.content}${note.content.trim() ? '\n' : ''}${finalText.trim()}` }
+          : note));
+      }
+    };
+    recognition.onerror = (event) => {
+      setNoteError(`Live transcription stopped: ${event.error}. You can edit or save the captured text.`);
+      setIsTranscribing(false);
+    };
+    recognition.onend = () => {
+      setIsTranscribing(false);
+      setInterimTranscript('');
+    };
+    recognitionRef.current = recognition;
+    recognition.start();
+    setIsTranscribing(true);
+  };
+
+  const stopTranscription = () => {
+    recognitionRef.current?.stop();
+    recognitionRef.current = null;
+    setIsTranscribing(false);
+    setInterimTranscript('');
+  };
+
   // Summarize
-  const handleSummarize = () => {
+  const handleSummarize = async () => {
     if (!activeNote?.content.trim()) {
       alert('Add some notes or record your lecture first, then try summarizing.');
       return;
     }
     setSummarizing(true);
     setSummary('');
-    setTimeout(() => {
-      const generated = generateSummary(activeNote.content, activeNote.hasRecording ?? false);
-      setSummary(generated);
-      setSummarizing(false);
-      // persist summary to database
-      supabase
+    setNoteError('');
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        router.push('/auth');
+        return;
+      }
+      const response = await fetch('/api/ai/summarize', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ documentText: activeNote.content, title: activeNote.title }),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error?.message ?? 'Summary generation failed.');
+      setSummary(body.summary);
+      updateNoteLocal(activeNote.id, { summary: body.summary });
+      const { error } = await supabase
         .from('study_notes')
-        .update({ summary: generated })
-        .eq('id', activeNote.id)
-        .then(({ error }) => {
-          if (error) console.error('Failed to save summary:', error.message);
-        });
-    }, 1800);
+        .update({ summary: body.summary })
+        .eq('id', activeNote.id);
+      if (error) throw new Error('The summary was generated but could not be saved.');
+    } catch (summaryError) {
+      setNoteError(summaryError instanceof Error ? summaryError.message : 'Summary generation failed.');
+    } finally {
+      setSummarizing(false);
+    }
   };
 
   const copySummary = () => {
@@ -272,9 +391,12 @@ export default function StudyNotesPage() {
   };
 
   useEffect(() => {
+    setSpeechSupported(Boolean(window.SpeechRecognition ?? window.webkitSpeechRecognition));
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
       streamRef.current?.getTracks().forEach((t) => t.stop());
+      recognitionRef.current?.stop();
+      Object.values(audioUrlsRef.current).forEach((url) => URL.revokeObjectURL(url));
     };
   }, []);
 
@@ -342,6 +464,12 @@ export default function StudyNotesPage() {
         </div>
       </motion.div>
 
+      {noteError && (
+        <div className="mt-6 rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive" role="alert">
+          {noteError}
+        </div>
+      )}
+
       {loading ? (
         <div className="mt-20 flex items-center justify-center">
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -359,6 +487,7 @@ export default function StudyNotesPage() {
                 <button
                   key={note.id}
                   onClick={() => {
+                    recognitionRef.current?.stop();
                     setActiveNoteId(note.id);
                     setSummary(note.summary ?? '');
                     if (playingId) {
@@ -463,14 +592,14 @@ export default function StudyNotesPage() {
                       </div>
                     ) : (
                       <p className="text-sm text-muted-foreground">
-                        {activeNote.hasRecording ? 'Recording saved with this note' : 'Click the mic to start recording your lecture'}
+                        {activeNote.hasRecording ? 'Temporary recording available in this browser tab' : 'Click the mic to start a temporary recording'}
                       </p>
                     )}
                   </div>
 
                   {activeNote.hasRecording && !isRecording && (
                     <div className="flex w-full max-w-md items-center gap-3 rounded-2xl border border-border bg-muted/30 p-3">
-                      <button onClick={() => togglePlayback(activeNote.id)} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary text-white transition-transform hover:scale-105">
+                      <button disabled={!audioUrls[activeNote.id]} onClick={() => togglePlayback(activeNote.id)} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary text-white transition-transform hover:scale-105 disabled:cursor-not-allowed disabled:opacity-40">
                         {playingId === activeNote.id ? <Pause className="h-5 w-5" /> : <Play className="h-5 w-5" />}
                       </button>
                       <div className="flex-1">
@@ -484,6 +613,30 @@ export default function StudyNotesPage() {
                       )}
                     </div>
                   )}
+                  <p className="max-w-md text-center text-xs text-muted-foreground">
+                    Recordings are temporary object URLs and are not persisted. Download the WebM file before leaving this tab if you need to keep it.
+                  </p>
+                  <div className="w-full max-w-md rounded-2xl border border-border bg-muted/20 p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-semibold">Live speech-to-text</p>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {speechSupported ? 'Final speech segments are appended to the editable notepad.' : 'Not supported by this browser; manual notes remain available.'}
+                        </p>
+                      </div>
+                      <Button
+                        type="button"
+                        variant={isTranscribing ? 'destructive' : 'outline'}
+                        size="sm"
+                        disabled={!speechSupported}
+                        onClick={isTranscribing ? stopTranscription : startTranscription}
+                        className="shrink-0 rounded-xl"
+                      >
+                        {isTranscribing ? <><Square className="mr-1.5 h-3.5 w-3.5" />Stop</> : <><Mic className="mr-1.5 h-3.5 w-3.5" />Transcribe</>}
+                      </Button>
+                    </div>
+                    {interimTranscript && <p className="mt-3 text-xs italic text-muted-foreground" aria-live="polite">{interimTranscript}</p>}
+                  </div>
                 </div>
               </div>
 
@@ -492,7 +645,7 @@ export default function StudyNotesPage() {
                 <div className="flex items-center justify-between border-b border-primary/10 px-5 py-3">
                   <div className="flex items-center gap-2 text-sm font-semibold text-primary">
                     <Sparkles className="h-4 w-4" />
-                    AI Summarizer
+                    Gemini AI Summarizer
                   </div>
                   <Button onClick={handleSummarize} disabled={summarizing || !activeNote.content.trim()} size="sm" className="rounded-xl bg-gradient-to-r from-primary to-secondary">
                     {summarizing ? (
@@ -521,7 +674,7 @@ export default function StudyNotesPage() {
                       <motion.div key="summary" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
                         <div className="mb-3 flex items-center justify-between">
                           <span className="text-xs font-semibold uppercase tracking-wider text-primary">
-                            Summary {activeNote.hasRecording && '• Includes voice notes'}
+                            AI-generated summary
                           </span>
                           <button onClick={copySummary} className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary">
                             {copied ? <Check className="h-3.5 w-3.5 text-success" /> : <Copy className="h-3.5 w-3.5" />}
@@ -529,6 +682,9 @@ export default function StudyNotesPage() {
                           </button>
                         </div>
                         <div className="whitespace-pre-wrap rounded-2xl border border-border bg-card p-4 text-sm leading-relaxed text-foreground/90">{summary}</div>
+                        <p className="mt-3 text-xs text-muted-foreground">
+                          AI-generated content can contain errors. Verify important details against your original notes.
+                        </p>
                       </motion.div>
                     ) : (
                       <motion.div key="empty" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex flex-col items-center py-6 text-center">
@@ -537,7 +693,7 @@ export default function StudyNotesPage() {
                         </div>
                         <p className="mt-3 text-sm font-medium">Get an instant summary</p>
                         <p className="mt-1 max-w-sm text-xs text-muted-foreground">
-                          Click &quot;Summarize&quot; to generate a concise summary of your notes{activeNote.hasRecording && ' and voice recording'}.
+                          Click &quot;Summarize&quot; to analyze the saved text in this note. Temporary audio is not sent to Gemini.
                         </p>
                       </motion.div>
                     )}
@@ -550,43 +706,4 @@ export default function StudyNotesPage() {
       )}
     </div>
   );
-}
-
-function generateSummary(content: string, hasRecording: boolean): string {
-  const lines = content
-    .split('\n')
-    .map((l) => l.trim())
-    .filter(Boolean);
-
-  if (lines.length === 0) return 'No content to summarize.';
-
-  const keyPoints: string[] = [];
-  const allText = lines.join(' ');
-
-  const keywords = allText.match(/\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\b/g) ?? [];
-  const uniqueKeywords = Array.from(new Set(keywords)).slice(0, 5);
-
-  const shortLines = lines.filter((l) => l.length < 120 && !l.endsWith(':'));
-
-  keyPoints.push(`This note covers ${lines.length} key idea${lines.length > 1 ? 's' : ''}${hasRecording ? ' along with a voice recording of the lecture' : ''}.`);
-  keyPoints.push('');
-
-  if (uniqueKeywords.length > 0) {
-    keyPoints.push(`Main topics: ${uniqueKeywords.join(', ')}.`);
-    keyPoints.push('');
-  }
-
-  keyPoints.push('Key takeaways:');
-  shortLines.slice(0, 5).forEach((line, i) => {
-    keyPoints.push(`  ${i + 1}. ${line.replace(/^[-•*]\s*/, '')}`);
-  });
-
-  if (shortLines.length > 5) {
-    keyPoints.push(`  ...and ${shortLines.length - 5} more points.`);
-  }
-
-  keyPoints.push('');
-  keyPoints.push('Tip: Review these points before your next exam for quick recall.');
-
-  return keyPoints.join('\n');
 }

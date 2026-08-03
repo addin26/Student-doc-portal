@@ -23,7 +23,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { FILE_TYPE_META, type Resource } from '@/lib/data';
+import { FILE_TYPE_META, type Resource } from '@/lib/catalog-types';
 
 const iconMap: Record<string, LucideIcon> = {
   FileText,
@@ -54,7 +54,7 @@ export function ResourceCard({
   resource: Resource;
   index?: number;
 }) {
-  const ft = FILE_TYPE_META[resource.fileType];
+  const ft = FILE_TYPE_META[resource.fileType] ?? FILE_TYPE_META.pdf;
 
   return (
     <motion.div

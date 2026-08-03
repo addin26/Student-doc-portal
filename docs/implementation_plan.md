@@ -2,10 +2,10 @@
 
 | Field | Value |
 | --- | --- |
-| Plan version | 2.4 |
+| Plan version | 3.0 |
 | Last updated | August 3, 2026 |
 | Applies to | `STUDYDOCK/`, `STUDYDOCK-ADMIN/`, shared Supabase project |
-| Source of requirements | `srs_document.md` version 2.1 |
+| Source of requirements | `srs_document.md` version 3.0 |
 | Delivery approach | Security-first, incremental, migration-driven |
 
 ## 1. Objective
@@ -20,50 +20,59 @@ This plan does not treat the existing walkthrough as proof of completion. Each c
 
 Already present:
 
-- Next.js 13 App Router, React 18, TypeScript, Tailwind, Radix UI, and Framer Motion.
+- Next.js 16.2.12 App Router, React 19.2, TypeScript 5.9, Tailwind, Radix UI, and Framer Motion. The security upgrade includes async request APIs, the `proxy.ts` convention, ESLint 9 flat configuration, and audited PostCSS/Sharp overrides.
 - Supabase sign-up/sign-in and browser client.
 - Pages for home, explore, resource details, upload, dashboard, universities, leaderboard, and study notes.
 - Initial database schema and migrations for profiles, reference data, resources, notes, courses, RLS, counters, merge RPCs, and fuzzy search.
 - R2 client and routes for presigned upload/download URLs.
 - Gemini adapter and summarization route.
 
-Material gaps:
+Implemented in the current working tree:
 
-- Explore and several community pages still use local fixture data.
-- Search RPC is trigram/`ILIKE` based despite being described as full-text search; it lacks bounded pagination and moderation filtering.
-- Upload validation is primarily client-side; presigned upload lifetime is one hour; there is no server finalization or orphan cleanup.
-- The AI route is unauthenticated and summarizes title/description rather than extracted document text.
-- Study-note audio uses temporary browser object URLs; speech-to-text is not implemented; note summaries are simulated.
-- Counter and download behavior depend on incomplete or mismatched RPC permissions.
-- Production identifiers must not have hard-coded fallbacks.
+- Live, bounded home/explore/detail/university/leaderboard/dashboard APIs and pages using `search_resources_v2` and visibility-aware RLS.
+- Registration, sign-in, verification resend, OAuth initiation, recovery/reset, password change, SSR cookie refresh, protected navigation, and sign-out.
+- Server-validated 15-minute R2 presign, object `HEAD`, transactional/idempotent finalization, MIME-extension binding, checksum support, and orphan cleanup tracking.
+- Authenticated download and AI endpoints with database-backed per-account rate limits and stable no-store error contracts.
+- Asynchronous PDF worker with bounded source size/page count, service-role-only claim/complete/fail RPCs, stale-lock recovery, retries, and validated Gemini output.
+- Truthful private notes: owner CRUD, autosave states, temporary recording disclosure, browser speech-to-text capability handling, and authenticated note summaries.
+
+Remaining release evidence/gaps:
+
+- The new migrations have not been applied because this workstation has no approved Supabase migration/service-role credential.
+- Staging RLS, RPC, upgrade, R2 partial-failure, browser E2E, visual-regression, accessibility, and representative performance tests are still required.
+- Persistent note audio/OCR remain outside release-one scope pending policy decisions.
 
 ### 2.2 Admin App - `STUDYDOCK-ADMIN/`
 
 Already present:
 
-- Next.js 13 App Router application on port 3001.
+- Next.js 16.2.12 App Router/React 19 application on port 3001 with the `proxy.ts` network boundary and ESLint 9 flat configuration.
 - Dashboard counts and pages for universities, courses, and resource records.
 - UI calls to edit university/course rows and execute merge RPCs.
 
-Material gaps:
+Implemented in the current working tree:
 
-- No sign-in page, server-side route guard, or demonstrated admin-role verification.
-- Privileged UI uses a browser Supabase client; security therefore depends entirely on currently incomplete RLS/RPC controls.
-- Resource deletion removes only the database row, not the R2 object.
-- Moderation statuses, approval/rejection, audit logging, user/role management, pagination, and robust error states are absent.
-- The admin package lacks a `typecheck` script and automated tests.
+- Email/password login, PKCE callback, SSR session refresh, protected server layout, active-admin checks, forbidden page, safe return path, identity display, and sign-out.
+- Live dashboard with moderation/AI/cleanup metrics and recent audit activity.
+- Audited university/course edit, approval, dependency-safe rejection, collision-aware merge preflight/execute, search, and bounded lists.
+- Resource moderation, forced-download review, feature/removal actions, permanent R2-plus-database deletion, and retryable cleanup operations.
+- Privacy-safe paginated user search, role/status changes, confirmation, audit references, and last-active-admin protection.
+- Operations page for retrying cleanup and AI jobs; lint/typecheck/test/build scripts pass locally.
+
+Remaining release evidence/gaps:
+
+- The browser UI calls internally-authorized audited RPCs for several mutations; their defense-in-depth behavior must be proven with non-admin identities after migration deployment.
+- A formal recent-authentication step for the highest-impact production actions is recommended before launch.
+- Pagination is bounded but university/course screens currently cap at 500 client-filtered rows; replace with server pagination before catalogs approach that size.
 
 ### 2.3 Database
 
-The current migrations are a useful baseline but MUST be followed by new corrective migrations. Deployed migration files MUST not be rewritten. Key issues include:
+Two additive corrective migrations are now authored:
 
-- `SECURITY DEFINER` merge functions have no internal admin check or fixed `search_path`.
-- Execute grants for merge/search functions are not explicitly constrained.
-- Only courses have an admin management policy; other reference and resource admin policies are incomplete.
-- Any authenticated user can insert a course with no ownership/proposal validation.
-- University proposals have no authenticated insert policy in the reviewed migration chain.
-- Merge functions do not handle uniqueness collisions or audit their actions.
-- Resource moderation/AI/upload states and an audit table do not yet exist.
+- `20260803120000_secure_rbac_and_rpc.sql` establishes corrected RBAC/RPC foundations.
+- `20260803130000_resource_lifecycle_and_search_v2.sql` adds normalized catalog ownership, moderation/account/AI state, audit and cleanup jobs, privacy-safe grants, rate limits, transactional finalization, ranked search, merge preflight/execute, admin/user functions, permanent deletion, and service-role AI worker functions.
+
+They remain **authored, not deployed**. Completion requires a fresh-database test and an upgrade test against a staging copy. The migration deliberately aborts on legacy normalized duplicates rather than guessing which records to merge; operators must resolve reported duplicates and rerun.
 
 ### 2.4 Verified access baseline
 
@@ -74,7 +83,7 @@ The following access was verified without exposing credential values or mutating
 | Supabase project URL and anonymous key | Configured in `STUDYDOCK/.env`; read access to live universities, categories, courses table, and resources was confirmed | Public reads can work subject to RLS; this does not permit migrations or unrestricted writes |
 | Supabase migration access | Not configured; Supabase CLI is not installed/linked and no database password, access token, service-role key, or database URL was found | This environment cannot currently apply DDL migrations or perform unrestricted database administration |
 | Authenticated test user/admin session | Not configured for diagnostics | Owner/admin insert, update, delete, and RPC behavior cannot yet be certified against the live project |
-| Admin App Supabase configuration | `STUDYDOCK-ADMIN/.env.local` now contains the verified shared public Supabase configuration; a live read and production build pass | Read-only public queries can run, but authentication and admin authorization are still absent |
+| Admin App Supabase configuration | `STUDYDOCK-ADMIN/.env.local` contains the shared public Supabase configuration; the login/gate code and production build pass | A designated active admin and regular-user session are still needed for end-to-end authorization evidence |
 | Cloudflare API token | The replacement token is active and can read the stated account, but the R2 bucket-list request returns HTTP 403 | It is not required by the application and is not stored; review its scope only if Cloudflare management automation is needed |
 | Cloudflare R2 S3 credentials | A complete credential pair and endpoint are now stored in the ignored Public App `.env.local`; the application typecheck/build passes | Credential evaluation and object operations remain unverified because TLS negotiation with the R2 endpoint fails from the current Windows environment before S3 authentication |
 | Gemini | The screenshot-derived credential returns HTTP 401 from the Gemini models API and is not stored | AI remains disabled/deferred until a valid server-side key is provided and verified |
@@ -83,7 +92,7 @@ Do not test unrestricted insert/delete access against live data. First create a 
 
 ### 2.5 Admin App failure assessment
 
-The Admin App passes TypeScript and a production build. It is nevertheless nonfunctional and unsafe at runtime for these concrete reasons:
+The original Admin App failure modes have been repaired in code. The table below distinguishes completed recovery from deployment evidence that is still missing:
 
 | Failure | Current cause | Recovery phase |
 | --- | --- | --- |
@@ -91,12 +100,12 @@ The Admin App passes TypeScript and a production build. It is nevertheless nonfu
 | Administrator sign-in | Implemented email/password sign-in with an SSR cookie session and profile-role check; provider/identity setup is not yet verified end to end | Phase 1 verification |
 | Protected content | Implemented middleware plus a protected server layout that checks `profiles.role` before rendering the Admin shell | Phase 1 verification |
 | University/course/resource writes | Corrective admin RLS policies are authored but not applied to the Supabase project | Apply and verify Phase 1 migration |
-| Merge RPC authorization | Corrected definitions include internal admin checks, fixed `search_path`, validation, and constrained grants; collision/audit v2 remains | Apply/verify Phase 1, then complete Phase 2 |
-| Resource deletion is incomplete | Client deletes only the database row and has no R2 secret/server cleanup route | Phase 4 and 6 |
-| Dashboard can display misleading zeros | Query errors are not surfaced | Phase 6 |
-| Moderation is only a record list/delete button | No lifecycle status, approval/rejection, audit, preview, or cleanup state | Phase 2 and 6 |
+| Merge RPC authorization | Internal admin checks, fixed `search_path`, validation, collision preflight/handling, audit, and constrained grants are authored | Apply/verify Phase 1 and 2 migrations |
+| Resource permanent deletion | Server route revokes visibility, deletes R2, records partial failure, retries from Operations, and deletes the DB row only after object success | Configure rotated Admin R2 secrets and run failure-injection tests |
+| Dashboard query failures | Live overview and audit feed render explicit errors | Verify against deployed functions and injected query failure |
+| Moderation and operations | Lifecycle actions, proposal review, forced review download, cleanup/AI operations, and user administration are implemented | Run the non-admin/admin E2E and audit matrix |
 
-This plan therefore treats the Admin App as a UI prototype to be recovered, not as a completed administration system.
+The Admin App is now a deployable implementation candidate, not a certified production control plane. Keep destructive production actions disabled until the database and external-service tests pass.
 
 ## 3. Delivery principles
 
@@ -289,7 +298,7 @@ Recommended file-level work:
 - refactor `STUDYDOCK/app/auth/page.tsx` without replacing its visual composition;
 - add recovery/reset/callback routes or pages using the chosen Supabase SSR pattern;
 - add shared browser/server Supabase helpers and an auth context only where client reactivity is needed;
-- add protected-layout or middleware behavior compatible with Next.js 13; and
+- add protected-layout or proxy behavior compatible with the current supported Next.js release; and
 - add account/session error components styled with the existing UI primitives.
 
 #### 1.4 Admin recovery sequence
@@ -309,8 +318,9 @@ Recover the Admin App in this order:
 **Implementation status:** Upload, download, and AI routes now use strict Bearer
 parsing, per-request JWT-bound Supabase clients, Zod validation, stable error
 contracts, request IDs, redacted user-facing failures, and `no-store` responses.
-The upload presign lifetime is 15 minutes. Distributed rate limiting and full
-upload finalization remain outstanding.
+The upload presign lifetime is 15 minutes. Database-backed per-account rate
+limiting, R2 `HEAD` finalization, idempotency, and cleanup tracking are now
+implemented; IP/provider abuse limits and production verification remain.
 
 Update public upload, download, and AI routes to:
 
@@ -340,6 +350,8 @@ Update public upload, download, and AI routes to:
 ### Phase 2 - Data model, lifecycle, and merge integrity
 
 **Goal:** Establish the state machines and auditability required by both applications.
+
+**Current status:** Code complete/pending deployment verification. The lifecycle/search migration contains the schema, normalization, visibility, audit, proposal, merge, user-state, cleanup, and worker contracts described below. Gate P2 remains blocked on database operator access and staging identity/rollback tests.
 
 #### 2.1 Lifecycle schema migration
 
@@ -390,6 +402,8 @@ Add a dry-run/preflight RPC returning affected counts and conflicts. The UI must
 
 **Goal:** Remove production dependence on `lib/data.ts` for resource and community content.
 
+**Current status:** Application integration complete/pending staging verification. Production pages no longer import fixture catalog data, and all list/search calls are bounded. Gate P3 still requires deployed RLS/search functions, browser not-found checks, representative query plans, and visual/accessibility regression evidence.
+
 #### 3.1 Search API/RPC v2
 
 Implement a paginated database query that:
@@ -433,6 +447,8 @@ For every page conversion, retain the current page structure and styling by repl
 ### Phase 4 - Reliable upload, R2, and AI pipeline
 
 **Goal:** Make uploads verifiable, recoverable, and safe while separating AI enrichment from upload success.
+
+**Current status:** Application and migration code complete/pending external-service verification. Presign/finalize/cleanup and the PDF worker are implemented. The local R2 diagnostic currently fails during TLS negotiation, and no rotated Gemini/service-role secrets are installed; Gate P4 cannot pass until Vercel/Node 20 staging smoke and failure-injection tests succeed.
 
 #### 4.1 Presigned upload improvements
 
@@ -490,6 +506,8 @@ Update `app/upload/page.tsx` to:
 
 **Goal:** Make the existing notes experience truthful, private, and persistent.
 
+**Current status:** Release-one behavior implemented/pending RLS/browser E2E. Recordings are intentionally session-only, live transcription is capability-detected, and note summaries use the authenticated Gemini adapter. Persistent audio is not promised and remains deferred until retention policy approval.
+
 #### 5.1 Notes correctness
 
 - Keep all CRUD under owner-only RLS.
@@ -518,6 +536,8 @@ Replace the timer-based simulated summary with the authenticated AI adapter, or 
 ### Phase 6 - Complete Admin App workflows
 
 **Goal:** Deliver usable, audited curation and moderation after backend security is proven.
+
+**Current status:** Workflow code complete/pending deployed authorization verification. Dashboard, proposals, merge, moderation, review download, permanent deletion, cleanup/AI operations, users, roles, and account states are present. Gate P6 still requires non-admin negative tests, R2 failure injection, audit inspection, and confirmation that all migrations are active.
 
 #### 6.1 Dashboard and navigation
 
@@ -552,6 +572,8 @@ Replace the timer-based simulated summary with the authenticated AI adapter, or 
 ### Phase 7 - Quality, operations, and launch
 
 **Goal:** Verify the platform as one ecosystem and establish safe deployment operations.
+
+**Current status:** Local lint, typecheck, unit tests, production builds, secret-pattern scan, and `npm audit --omit=dev` pass for both repositories with zero reported vulnerabilities. Database/E2E/accessibility/performance/restore tests, production observability, rotated secrets, and launch approval remain open.
 
 #### 7.1 Automated quality gates
 
@@ -666,23 +688,29 @@ Seed representative universities, courses, users, and at least the agreed target
 
 - `NEXT_PUBLIC_SUPABASE_URL`
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+- `NEXT_PUBLIC_SITE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY` (server-only; used only by the internal AI worker)
 - `CLOUDFLARE_R2_ACCOUNT_ID`
 - `CLOUDFLARE_R2_ACCESS_KEY_ID`
 - `CLOUDFLARE_R2_SECRET_ACCESS_KEY`
 - `CLOUDFLARE_R2_ENDPOINT` (optional when derived safely)
 - `CLOUDFLARE_R2_BUCKET_NAME`
+- `UPLOAD_MAX_BYTES`
 - `GEMINI_API_KEY`
-- AI model/configuration variables
+- `GEMINI_MODEL`
+- `CRON_SECRET`
+- `AI_MAX_SOURCE_BYTES`
 - rate-limit/observability variables selected for deployment
 
-Database migration variables or tokens MUST NOT be placed in the Public App runtime environment. They belong in the operator workstation/CI secret scope used for reviewed migration execution.
+Database migration variables or tokens MUST NOT be placed in the Public App runtime environment. They belong in the operator workstation/CI secret scope used for reviewed migration execution. The service-role key is a separate runtime secret used exclusively by the cron worker; it MUST never be imported by a client component, logged, or reused as a general application database client.
 
 ### Admin App environment
 
 - `NEXT_PUBLIC_SUPABASE_URL`
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-- server-only credentials only if an approved server route truly requires them; never prefix secrets with `NEXT_PUBLIC_`
-- public-app and admin-app canonical origins
+- `NEXT_PUBLIC_ADMIN_SITE_URL`
+- `NEXT_PUBLIC_PORTAL_URL`
+- the five server-only Cloudflare R2 account/access/secret/endpoint/bucket variables required by review download and cleanup routes
 - observability variables
 
 Environment templates MUST contain descriptions and safe examples, never real secrets. Production deployments MUST validate required configuration before serving traffic.

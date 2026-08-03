@@ -26,6 +26,8 @@ function AuthForm() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [verificationPending, setVerificationPending] = useState(false);
+  const [resendCoolingDown, setResendCoolingDown] = useState(false);
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -61,6 +63,7 @@ function AuthForm() {
         if (signUpError) throw signUpError;
 
         if (!data.session) {
+          setVerificationPending(true);
           setNotice('Check your email to verify your account, then return to sign in.');
           return;
         }
@@ -86,6 +89,20 @@ function AuthForm() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const resendVerification = async () => {
+    if (!email.trim() || resendCoolingDown) return;
+    setError('');
+    setResendCoolingDown(true);
+    const { error: resendError } = await supabase.auth.resend({
+      type: 'signup',
+      email: email.trim(),
+      options: { emailRedirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(nextPath)}` },
+    });
+    if (resendError) setError('Verification email could not be resent yet. Wait and try again.');
+    else setNotice('If verification is still required, a new email is on its way.');
+    window.setTimeout(() => setResendCoolingDown(false), 60_000);
   };
 
   const handleOAuth = async (provider: 'google' | 'github') => {
@@ -252,6 +269,12 @@ function AuthForm() {
               </p>
             )}
 
+            {verificationPending && (
+              <button type="button" disabled={resendCoolingDown} onClick={() => void resendVerification()} className="text-sm font-semibold text-primary hover:underline disabled:opacity-50">
+                {resendCoolingDown ? 'Resend available in one minute' : 'Resend verification email'}
+              </button>
+            )}
+
             {mode === 'login' && (
               <div className="flex justify-end">
                 <Link href="/auth/forgot" className="text-xs font-medium text-primary hover:underline">
@@ -294,7 +317,7 @@ function AuthForm() {
 
         {mode === 'signup' && (
           <p className="mt-4 text-center text-xs text-muted-foreground">
-            Use your university email (.edu) for verified contributor status.
+            Use an address you can access so account verification and recovery work reliably.
           </p>
         )}
       </div>
