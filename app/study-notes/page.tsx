@@ -537,7 +537,7 @@ export default function StudyNotesPage() {
                         </div>
                         <p className="mt-3 text-sm font-medium">Get an instant summary</p>
                         <p className="mt-1 max-w-sm text-xs text-muted-foreground">
-                          Click "Summarize" to generate a concise summary of your notes{activeNote.hasRecording && ' and voice recording'}.
+                          Click &quot;Summarize&quot; to generate a concise summary of your notes{activeNote.hasRecording && ' and voice recording'}.
                         </p>
                       </motion.div>
                     )}

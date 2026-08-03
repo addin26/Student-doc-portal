@@ -243,24 +243,24 @@ export default function UploadPage() {
         },
         body: JSON.stringify({
           fileName: file.name,
-          fileType: file.type || 'application/octet-stream',
-          fileSize: file.size,
+          contentType: file.type || 'application/octet-stream',
+          sizeBytes: file.size,
         }),
       });
 
       if (!presignedRes.ok) {
         const errJson = await presignedRes.json();
-        throw new Error(errJson.error || 'Could not prepare upload session.');
+        throw new Error(errJson.error?.message || 'Could not prepare upload session.');
       }
 
-      const { uploadUrl, storageKey, storageProvider } = await presignedRes.json();
+      const { uploadUrl, storageKey, storageProvider, requiredHeaders } = await presignedRes.json();
 
       setUploadProgress(30);
 
       // 2. Upload file directly to Cloudflare R2 via Presigned PUT URL
       const r2UploadRes = await fetch(uploadUrl, {
         method: 'PUT',
-        headers: {
+        headers: requiredHeaders || {
           'Content-Type': file.type || 'application/octet-stream',
         },
         body: file,
@@ -278,7 +278,10 @@ export default function UploadPage() {
       try {
         const aiRes = await fetch('/api/ai/summarize', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
           body: JSON.stringify({
             documentText: `${form.title}. ${form.description}. Category: ${form.category}`,
             title: form.title,
@@ -334,11 +337,6 @@ export default function UploadPage() {
       });
 
       if (dbError) throw dbError;
-
-      // Increment profile upload count
-      await supabase.rpc('increment_uploads', { user_id: userId }).then(({ error }) => {
-        if (error) console.error('Could not update upload count:', error.message);
-      });
 
       setUploadProgress(100);
       setSubmitted(true);

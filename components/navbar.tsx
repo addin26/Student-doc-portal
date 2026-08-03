@@ -1,12 +1,13 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Search, Upload, Menu, X, Bell, LayoutDashboard, Sparkles, NotebookPen } from 'lucide-react';
+import { Search, Upload, Menu, X, Bell, LayoutDashboard, Sparkles, NotebookPen, LogIn, LogOut } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
+import { supabase } from '@/lib/supabase';
 
 const navLinks = [
   { href: '/explore', label: 'Explore' },
@@ -17,8 +18,11 @@ const navLinks = [
 
 export function Navbar() {
   const pathname = usePathname();
+  const router = useRouter();
   const [scrolled, setScrolled] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [signedIn, setSignedIn] = useState(false);
+  const [authReady, setAuthReady] = useState(false);
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 20);
@@ -30,6 +34,25 @@ export function Navbar() {
   useEffect(() => {
     setMobileOpen(false);
   }, [pathname]);
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => {
+      setSignedIn(Boolean(data.user));
+      setAuthReady(true);
+    });
+    const { data } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSignedIn(Boolean(session?.user));
+      setAuthReady(true);
+    });
+    return () => data.subscription.unsubscribe();
+  }, []);
+
+  const handleSignOut = async () => {
+    await supabase.auth.signOut();
+    setSignedIn(false);
+    router.replace('/');
+    router.refresh();
+  };
 
   return (
     <>
@@ -123,6 +146,26 @@ export function Navbar() {
                 In class Study Notes
               </Link>
             </Button>
+            {authReady && (
+              signedIn ? (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="rounded-xl"
+                  onClick={handleSignOut}
+                >
+                  <LogOut className="mr-1.5 h-4 w-4" />
+                  Sign out
+                </Button>
+              ) : (
+                <Button variant="ghost" size="sm" className="rounded-xl" asChild>
+                  <Link href="/auth">
+                    <LogIn className="mr-1.5 h-4 w-4" />
+                    Sign in
+                  </Link>
+                </Button>
+              )
+            )}
             <Button
               size="sm"
               className="rounded-xl bg-gradient-to-r from-primary to-secondary text-white shadow-glow"
@@ -171,9 +214,19 @@ export function Navbar() {
                   In class Study Notes
                 </Link>
                 <div className="mt-2 grid grid-cols-2 gap-2">
-                  <Button variant="outline" size="sm" className="rounded-xl" asChild>
-                    <Link href="/auth/login">Sign In</Link>
-                  </Button>
+                  {signedIn ? (
+                    <Button variant="outline" size="sm" className="rounded-xl" onClick={handleSignOut}>
+                      <LogOut className="mr-1.5 h-4 w-4" />
+                      Sign out
+                    </Button>
+                  ) : (
+                    <Button variant="outline" size="sm" className="rounded-xl" asChild>
+                      <Link href="/auth">
+                        <LogIn className="mr-1.5 h-4 w-4" />
+                        Sign in
+                      </Link>
+                    </Button>
+                  )}
                   <Button size="sm" className="rounded-xl" asChild>
                     <Link href="/upload">
                       <Upload className="mr-1.5 h-4 w-4" />

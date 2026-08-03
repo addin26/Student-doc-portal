@@ -2,7 +2,7 @@
 
 | Field | Value |
 | --- | --- |
-| Plan version | 2.3 |
+| Plan version | 2.4 |
 | Last updated | August 3, 2026 |
 | Applies to | `STUDYDOCK/`, `STUDYDOCK-ADMIN/`, shared Supabase project |
 | Source of requirements | `srs_document.md` version 2.1 |
@@ -88,10 +88,10 @@ The Admin App passes TypeScript and a production build. It is nevertheless nonfu
 | Failure | Current cause | Recovery phase |
 | --- | --- | --- |
 | Local pages previously could not load live data | Admin `.env.local` was missing; the verified Supabase public configuration has now been added and read-tested | Configuration fixed locally; remove placeholder code fallback in Phase 0 |
-| No administrator can intentionally sign in | No Admin App login page or trusted shared login redirect | Phase 1 |
-| Protected content is visible before role evaluation | No middleware/protected server layout | Phase 1 |
-| University edits/deletes are blocked or inconsistent | Missing admin RLS policies | Phase 1 |
-| Merge RPC is unsafe even if the UI is hidden | `SECURITY DEFINER` function has no internal admin check/fixed `search_path` or constrained grants | Phase 1 and 2 |
+| Administrator sign-in | Implemented email/password sign-in with an SSR cookie session and profile-role check; provider/identity setup is not yet verified end to end | Phase 1 verification |
+| Protected content | Implemented middleware plus a protected server layout that checks `profiles.role` before rendering the Admin shell | Phase 1 verification |
+| University/course/resource writes | Corrective admin RLS policies are authored but not applied to the Supabase project | Apply and verify Phase 1 migration |
+| Merge RPC authorization | Corrected definitions include internal admin checks, fixed `search_path`, validation, and constrained grants; collision/audit v2 remains | Apply/verify Phase 1, then complete Phase 2 |
 | Resource deletion is incomplete | Client deletes only the database row and has no R2 secret/server cleanup route | Phase 4 and 6 |
 | Dashboard can display misleading zeros | Query errors are not surfaced | Phase 6 |
 | Moderation is only a record list/delete button | No lifecycle status, approval/rejection, audit, preview, or cleanup state | Phase 2 and 6 |
@@ -183,15 +183,16 @@ Status values in this plan are **Existing**, **Partial**, and **Not started**. T
 | Task | Status | Deliverable |
 | --- | --- | --- |
 | Confirm local, staging, and production Supabase projects | Not started | Environment matrix with project identifiers stored outside source |
-| Confirm hosting provider and runtime for both apps | Not started | Deployment decision including background-job capability |
+| Confirm hosting provider and runtime for both apps | Partial | Vercel/Node 20 deployment setup is documented for both apps; projects, domains, and background-job approach remain to be configured |
 | Define content/moderation policy and uploader attestation | Not started | Approved policy linked from upload and admin UI |
 | Decide supported extraction formats and audio retention | Not started | Architecture decision records (ADRs) |
-| Capture clean baseline builds and current test failures | Partial | Both production builds and the Public App typecheck pass; formal test baseline remains |
+| Capture clean baseline builds and current test failures | Partial | Both production builds, typechecks, and initial safe-redirect unit tests pass; auth/RLS/provider E2E and load/accessibility baselines remain |
 | Add `.env.example` files without secrets | Existing | Public and Admin templates exist; local files are ignored |
 | Provision and verify migration access for a staging Supabase project | Not started | Installed/authenticated CLI or approved CI migration identity plus linked project |
 | Provision R2 staging credentials, private bucket, and CORS policy | Partial | Local S3 credentials configured and app build passes; endpoint TLS, bucket existence/access, CORS, and object smoke test remain |
 | Add Public Supabase variables to the Admin deployment | Partial | Local Admin environment and live read verified; deployment environment remains |
 | Decide whether to provision Gemini now or defer behind a disabled flag | Not started | Server-side key and budget/policy, or explicit deferred configuration |
+| Document Vercel setup for both repositories | Existing | Root `setup.md` in each project covers build settings, environment scopes, callbacks, migration order, verification, and rollback |
 
 Implementation notes:
 
@@ -226,6 +227,10 @@ Do not mark R2 complete based only on a successful Next.js build; build-time val
 
 #### 1.1 Corrective security migration
 
+**Implementation status:** Authored in
+`supabase/migrations/20260803120000_secure_rbac_and_rpc.sql`; application to
+staging/production and RLS/RPC identity-matrix tests remain required.
+
 Create a new migration such as:
 
 `STUDYDOCK/supabase/migrations/20260803xxxxxx_secure_rbac_and_rpc.sql`
@@ -245,6 +250,11 @@ Do not expose service-role credentials in either application.
 
 #### 1.2 Admin application authentication
 
+**Implementation status:** Admin login, PKCE callback, cookie-refresh
+middleware, non-admin forbidden route, protected server layout, verified admin
+identity display, and sign-out are implemented. Live tests with designated user
+and admin identities remain required.
+
 Add:
 
 - an admin sign-in/session-expired page;
@@ -256,6 +266,12 @@ Add:
 All admin mutations should move behind route handlers or server actions that repeat the role check. The RPC remains responsible for its own authorization as defense in depth.
 
 #### 1.3 Public registration and login completion
+
+**Implementation status:** Existing visual design is retained. Email/password
+registration and login, email verification handling, OAuth initiation, safe
+return paths, password recovery/reset, cookie-backed SSR sessions,
+protected-route middleware, and sign-out are implemented. Provider configuration,
+email delivery, abuse limits, and browser E2E tests remain.
 
 Preserve the existing `/auth` page design while separating and completing these states:
 
@@ -290,6 +306,12 @@ Recover the Admin App in this order:
 
 #### 1.5 Route hardening
 
+**Implementation status:** Upload, download, and AI routes now use strict Bearer
+parsing, per-request JWT-bound Supabase clients, Zod validation, stable error
+contracts, request IDs, redacted user-facing failures, and `no-store` responses.
+The upload presign lifetime is 15 minutes. Distributed rate limiting and full
+upload finalization remain outstanding.
+
 Update public upload, download, and AI routes to:
 
 - parse `Bearer` headers strictly;
@@ -303,6 +325,17 @@ Update public upload, download, and AI routes to:
 **Tests:** registration, duplicate registration, sign-in, sign-out, verification, recovery, reset, session expiry/refresh, safe return path, RLS matrix, anonymous/user/admin RPC calls, non-admin Admin App access, protected-field update, malformed tokens, redirect-loop prevention, and secret scan.
 
 **Gate P1:** Public registration/login/recovery/session flows work end to end; no visitor or regular user can execute an admin mutation, change protected profile fields, or access an Admin App page/API.
+
+#### 1.6 Remaining evidence before Gate P1 can pass
+
+1. Apply the corrective migration to an isolated staging Supabase project.
+2. Test anonymous, User A, User B, and admin table/RPC permissions.
+3. Configure production/preview callback allowlists and validate email delivery.
+4. Verify registration, verification, login, logout, recovery, reset, expiry,
+   refresh, safe return paths, and OAuth-provider failure states in a browser.
+5. Add a Vercel-compatible distributed rate limiter for auth-adjacent API routes.
+6. Move remaining privileged Admin mutations behind server route/action boundaries.
+7. Confirm logs and built client assets contain no tokens or server secrets.
 
 ### Phase 2 - Data model, lifecycle, and merge integrity
 

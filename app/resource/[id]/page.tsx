@@ -55,7 +55,7 @@ export default function ResourceDetailPage() {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) {
         setDownloadError('Registration required. Only registered users can download study resources.');
-        setTimeout(() => router.push('/auth'), 1500);
+        setTimeout(() => router.push(`/auth?next=${encodeURIComponent(`/resource/${id}`)}`), 1500);
         return;
       }
 
@@ -69,7 +69,7 @@ export default function ResourceDetailPage() {
 
       if (!res.ok) {
         const errData = await res.json();
-        throw new Error(errData.error || 'Failed to generate download link.');
+        throw new Error(errData.error?.message || 'Failed to generate download link.');
       }
 
       const { downloadUrl } = await res.json();

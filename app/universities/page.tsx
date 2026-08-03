@@ -105,7 +105,7 @@ export default function UniversitiesPage() {
       )}
 
       <div className="mt-12 rounded-3xl border border-border bg-gradient-to-br from-primary/5 to-secondary/5 p-8 text-center">
-        <h3 className="font-display text-xl font-semibold">Don't see your university?</h3>
+        <h3 className="font-display text-xl font-semibold">Don&apos;t see your university?</h3>
         <p className="mt-2 text-sm text-muted-foreground">
           You can still upload and access resources — list it during upload.
         </p>

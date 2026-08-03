@@ -29,7 +29,7 @@ function getR2Config() {
 /**
  * Generate a presigned upload URL for direct client-to-R2 upload
  */
-export async function getR2UploadPresignedUrl(key: string, contentType: string, expiresInSeconds = 3600): Promise<string> {
+export async function getR2UploadPresignedUrl(key: string, contentType: string, expiresInSeconds = 900): Promise<string> {
   const { client, bucketName } = getR2Config();
   const command = new PutObjectCommand({
     Bucket: bucketName,

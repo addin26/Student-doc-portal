@@ -2,7 +2,7 @@
 
 | Field | Value |
 | --- | --- |
-| Document version | 2.1 |
+| Document version | 2.2 |
 | Product | STUDYDOCK Public App and STUDYDOCK Admin App |
 | Status | Implementation baseline and target specification |
 | Last updated | August 3, 2026 |
@@ -561,15 +561,15 @@ This table reflects the repository as reviewed on August 3, 2026. It is a planni
 | Area | Current state | Required next state |
 | --- | --- | --- |
 | Public UI | Core pages and styling exist | Connect remaining fixture-backed pages to live data |
-| Authentication | Public email/password registration and sign-in exist; password recovery, verification UX, consistent return paths, and complete session states are absent | Implement PUB-AUTH-001 through PUB-AUTH-007 and admin authentication requirements |
+| Authentication | Public registration/login, verification handling, OAuth initiation, recovery/reset, safe return paths, cookie-backed SSR sessions, protected-route middleware, and sign-out are implemented; provider configuration, rate limiting, and browser E2E remain | Verify PUB-AUTH requirements against staging identities and complete abuse controls |
 | Explore/search | Uses in-memory fixture data | Use paginated `search_resources_intelligent` or a corrected database search API |
 | Upload | Direct R2 PUT and resource insert exist | Enforce server validation, shorten URL lifetime, add finalization/object verification and orphan cleanup |
 | AI summary | Route exists but receives title/description text | Extract supported document content, require auth/rate limits, validate output, and process asynchronously |
 | Download | Auth check and presigned GET route exist | Enforce visibility, fix atomic counter permissions, add no-store response and provider checks |
 | Study notes | Database CRUD and temporary MediaRecorder playback exist | Add persistent audio upload if promised; implement actual speech-to-text; replace simulated summary |
 | Database | Core schema, RLS, courses, and merge/search functions exist | Add resource/AI statuses, audit log, admin RLS, secure RPC checks/grants, and merge-collision handling |
-| Admin UI | The project builds and now has a local verified Supabase public configuration, but it has no sign-in flow, protected layout, or server mutation boundary; privileged runtime actions remain unavailable or unsafe | Add admin authentication, complete moderation, audit, R2 deletion, error handling, and user roles |
-| Admin authorization | UI labels claim RBAC protection, but no page guard exists and current merge functions lack internal role checks | Implement and test page, server-route, RLS, and RPC authorization before using admin mutations |
+| Admin UI | The project builds and now has sign-in, SSR session refresh, a forbidden state, protected server layout, and sign-out; moderation, audit, R2 deletion, robust errors, and user management remain incomplete | Apply/verify the security migration, move mutations server-side, and complete Phase 2/6 workflows |
+| Admin authorization | Page middleware/server layout and corrected RLS/RPC migration code exist, but the migration is not deployed and the identity matrix is untested | Apply migration in staging and prove page, route, RLS, and RPC rejection for non-admins |
 | Infrastructure access | Both apps have local public Supabase configuration and live reads work; no migration credential/linked CLI is available; a replacement Cloudflare token is active but its R2 bucket-list call returns HTTP 403; complete R2 S3 credentials are stored locally but endpoint TLS fails before authentication can be tested; the screenshot-derived Gemini key returns HTTP 401 | Provision migration access, resolve and complete the R2 object smoke test from a supported runtime, replace/verify the optional Gemini key, rotate exposed credentials, and configure deployment secrets securely |
 | Metrics | Some live counts exist | Surface query failures and add moderation/AI/audit metrics |
 
