@@ -2364,3 +2364,245 @@ REVOKE ALL ON FUNCTION public.request_resource_permanent_deletion(uuid, text, te
 GRANT EXECUTE ON FUNCTION public.reject_university_proposal(uuid, text, text) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.reject_course_proposal(uuid, text, text) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.request_resource_permanent_deletion(uuid, text, text) TO authenticated;
+
+-- ---------------------------------------------------------------------------
+-- Combined account and privacy-preserving IP rate limits
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS public.api_ip_rate_limit_buckets (
+  ip_hash text NOT NULL CHECK (ip_hash ~ '^[a-f0-9]{64}$'),
+  action text NOT NULL,
+  window_started_at timestamptz NOT NULL,
+  request_count integer NOT NULL DEFAULT 0 CHECK (request_count >= 0),
+  expires_at timestamptz NOT NULL,
+  PRIMARY KEY (ip_hash, action, window_started_at)
+);
+
+CREATE INDEX IF NOT EXISTS idx_api_ip_rate_limit_buckets_expiry
+  ON public.api_ip_rate_limit_buckets(expires_at);
+
+ALTER TABLE public.api_ip_rate_limit_buckets ENABLE ROW LEVEL SECURITY;
+
+CREATE OR REPLACE FUNCTION public.consume_api_rate_limit_v2(
+  p_action text,
+  p_ip_hash text
+)
+RETURNS TABLE (allowed boolean, retry_after_seconds integer, remaining integer)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+DECLARE
+  caller_id uuid := (SELECT auth.uid());
+  normalized_action text := lower(btrim(p_action));
+  account_limit integer;
+  ip_limit integer;
+  window_seconds integer;
+  bucket_start timestamptz;
+  account_count integer;
+  ip_count integer;
+BEGIN
+  IF caller_id IS NULL THEN RAISE EXCEPTION 'Authentication required.' USING ERRCODE = '42501'; END IF;
+  IF p_ip_hash !~ '^[a-f0-9]{64}$' THEN RAISE EXCEPTION 'Invalid IP hash.' USING ERRCODE = '22023'; END IF;
+
+  SELECT limits.account_limit, limits.ip_limit, limits.window_seconds
+  INTO account_limit, ip_limit, window_seconds
+  FROM (VALUES
+    ('upload.presign', 10, 40, 60),
+    ('upload.finalize', 10, 40, 60),
+    ('resource.download', 60, 180, 60),
+    ('ai.summarize', 10, 30, 60)
+  ) AS limits(action, account_limit, ip_limit, window_seconds)
+  WHERE limits.action = normalized_action;
+
+  IF account_limit IS NULL THEN RAISE EXCEPTION 'Unknown rate-limit action.' USING ERRCODE = '22023'; END IF;
+  bucket_start := to_timestamp(floor(extract(epoch FROM now()) / window_seconds) * window_seconds);
+
+  INSERT INTO public.api_rate_limit_buckets (actor_id, action, window_started_at, request_count, expires_at)
+  VALUES (caller_id, normalized_action, bucket_start, 1, bucket_start + make_interval(secs => window_seconds * 2))
+  ON CONFLICT (actor_id, action, window_started_at)
+  DO UPDATE SET request_count = public.api_rate_limit_buckets.request_count + 1
+  RETURNING request_count INTO account_count;
+
+  INSERT INTO public.api_ip_rate_limit_buckets (ip_hash, action, window_started_at, request_count, expires_at)
+  VALUES (p_ip_hash, normalized_action, bucket_start, 1, bucket_start + make_interval(secs => window_seconds * 2))
+  ON CONFLICT (ip_hash, action, window_started_at)
+  DO UPDATE SET request_count = public.api_ip_rate_limit_buckets.request_count + 1
+  RETURNING request_count INTO ip_count;
+
+  RETURN QUERY SELECT
+    account_count <= account_limit AND ip_count <= ip_limit,
+    greatest(1, ceil(extract(epoch FROM (bucket_start + make_interval(secs => window_seconds) - now())))::integer),
+    greatest(0, least(account_limit - account_count, ip_limit - ip_count));
+END;
+$$;
+
+REVOKE ALL ON TABLE public.api_ip_rate_limit_buckets FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.consume_api_rate_limit_v2(text, text) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.consume_api_rate_limit_v2(text, text) TO authenticated;
+
+-- ---------------------------------------------------------------------------
+-- Delayed, retryable account erasure after the logical deleted state
+-- ---------------------------------------------------------------------------
+
+DO $$
+BEGIN
+  CREATE TYPE public.erasure_job_status AS ENUM (
+    'scheduled', 'processing', 'completed', 'failed', 'cancelled'
+  );
+EXCEPTION WHEN duplicate_object THEN NULL;
+END
+$$;
+
+CREATE TABLE IF NOT EXISTS public.account_erasure_jobs (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  target_user_id uuid NOT NULL UNIQUE,
+  status public.erasure_job_status NOT NULL DEFAULT 'scheduled',
+  scheduled_for timestamptz NOT NULL DEFAULT (now() + interval '30 days'),
+  attempts integer NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+  max_attempts integer NOT NULL DEFAULT 5 CHECK (max_attempts BETWEEN 1 AND 10),
+  locked_at timestamptz,
+  locked_by uuid,
+  completed_at timestamptz,
+  last_error_code text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_account_erasure_jobs_work
+  ON public.account_erasure_jobs(status, scheduled_for, id)
+  WHERE status IN ('scheduled'::public.erasure_job_status, 'failed'::public.erasure_job_status);
+
+ALTER TABLE public.account_erasure_jobs ENABLE ROW LEVEL SECURITY;
+
+REVOKE ALL ON TABLE public.account_erasure_jobs FROM PUBLIC, anon, authenticated;
+GRANT SELECT ON TABLE public.account_erasure_jobs TO authenticated;
+
+CREATE POLICY "admin_read_account_erasure_jobs"
+ON public.account_erasure_jobs FOR SELECT TO authenticated
+USING ((SELECT public.is_admin()));
+
+CREATE TRIGGER account_erasure_jobs_set_updated_at
+BEFORE UPDATE ON public.account_erasure_jobs
+FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+CREATE OR REPLACE FUNCTION public.schedule_account_erasure_from_profile()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+BEGIN
+  IF NEW.account_status = 'deleted'::public.account_status
+     AND OLD.account_status <> 'deleted'::public.account_status THEN
+    INSERT INTO public.account_erasure_jobs (target_user_id, status, scheduled_for)
+    VALUES (NEW.id, 'scheduled'::public.erasure_job_status, now() + interval '30 days')
+    ON CONFLICT (target_user_id) DO UPDATE
+    SET status = 'scheduled'::public.erasure_job_status,
+        scheduled_for = now() + interval '30 days',
+        attempts = 0,
+        locked_at = NULL,
+        locked_by = NULL,
+        completed_at = NULL,
+        last_error_code = NULL;
+  ELSIF NEW.account_status = 'active'::public.account_status
+        AND OLD.account_status = 'deleted'::public.account_status THEN
+    UPDATE public.account_erasure_jobs
+    SET status = 'cancelled'::public.erasure_job_status,
+        locked_at = NULL,
+        locked_by = NULL,
+        last_error_code = NULL
+    WHERE target_user_id = NEW.id
+      AND status <> 'completed'::public.erasure_job_status;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER profiles_schedule_account_erasure
+AFTER UPDATE OF account_status ON public.profiles
+FOR EACH ROW EXECUTE FUNCTION public.schedule_account_erasure_from_profile();
+
+CREATE OR REPLACE FUNCTION public.claim_account_erasure_job(p_worker_id uuid)
+RETURNS TABLE (job_id uuid, target_user_id uuid)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+BEGIN
+  IF p_worker_id IS NULL THEN RAISE EXCEPTION 'Worker identity is required.' USING ERRCODE = '22023'; END IF;
+  RETURN QUERY
+  WITH candidate AS (
+    SELECT job.id
+    FROM public.account_erasure_jobs AS job
+    WHERE job.attempts < job.max_attempts
+      AND (
+        (job.status IN ('scheduled'::public.erasure_job_status, 'failed'::public.erasure_job_status)
+          AND job.scheduled_for <= now())
+        OR (job.status = 'processing'::public.erasure_job_status
+          AND job.locked_at < now() - interval '30 minutes')
+      )
+    ORDER BY job.scheduled_for, job.created_at, job.id
+    FOR UPDATE SKIP LOCKED LIMIT 1
+  )
+  UPDATE public.account_erasure_jobs AS job
+  SET status = 'processing'::public.erasure_job_status,
+      attempts = job.attempts + 1,
+      locked_at = now(),
+      locked_by = p_worker_id,
+      last_error_code = NULL
+  FROM candidate
+  WHERE job.id = candidate.id
+  RETURNING job.id, job.target_user_id;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.complete_account_erasure_job(p_job_id uuid, p_worker_id uuid)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+BEGIN
+  UPDATE public.account_erasure_jobs
+  SET status = 'completed'::public.erasure_job_status,
+      completed_at = now(), locked_at = NULL, locked_by = NULL, last_error_code = NULL
+  WHERE id = p_job_id AND status = 'processing'::public.erasure_job_status AND locked_by = p_worker_id;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Erasure job lock is invalid.' USING ERRCODE = '42501'; END IF;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.fail_account_erasure_job(
+  p_job_id uuid, p_worker_id uuid, p_error_code text
+)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+DECLARE
+  safe_code text := upper(btrim(coalesce(p_error_code, 'ACCOUNT_ERASURE_FAILED')));
+BEGIN
+  IF safe_code !~ '^[A-Z0-9_]{3,80}$' THEN safe_code := 'ACCOUNT_ERASURE_FAILED'; END IF;
+  UPDATE public.account_erasure_jobs
+  SET status = 'failed'::public.erasure_job_status,
+      attempts = CASE WHEN safe_code = 'ERASURE_MORE_RESOURCES_PENDING' THEN greatest(attempts - 1, 0) ELSE attempts END,
+      scheduled_for = now() + CASE
+        WHEN safe_code = 'ERASURE_MORE_RESOURCES_PENDING' THEN interval '1 minute'
+        WHEN attempts = 1 THEN interval '30 minutes'
+        WHEN attempts = 2 THEN interval '2 hours'
+        ELSE interval '1 day'
+      END,
+      locked_at = NULL, locked_by = NULL, last_error_code = safe_code
+  WHERE id = p_job_id AND status = 'processing'::public.erasure_job_status AND locked_by = p_worker_id;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Erasure job lock is invalid.' USING ERRCODE = '42501'; END IF;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.schedule_account_erasure_from_profile() FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.claim_account_erasure_job(uuid) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.complete_account_erasure_job(uuid, uuid) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.fail_account_erasure_job(uuid, uuid, text) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.claim_account_erasure_job(uuid) TO service_role;
+GRANT EXECUTE ON FUNCTION public.complete_account_erasure_job(uuid, uuid) TO service_role;
+GRANT EXECUTE ON FUNCTION public.fail_account_erasure_job(uuid, uuid, text) TO service_role;

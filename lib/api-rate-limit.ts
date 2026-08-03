@@ -1,5 +1,7 @@
 import 'server-only';
 import type { AuthenticatedRequest } from '@/lib/api-auth';
+import type { NextRequest } from 'next/server';
+import { getRateLimitIpHash } from '@/lib/request-security';
 
 export type RateLimitedAction =
   | 'upload.presign'
@@ -10,9 +12,11 @@ export type RateLimitedAction =
 export async function consumeApiRateLimit(
   auth: AuthenticatedRequest,
   action: RateLimitedAction,
+  request: NextRequest,
 ) {
-  const { data, error } = await auth.supabase.rpc('consume_api_rate_limit', {
+  const { data, error } = await auth.supabase.rpc('consume_api_rate_limit_v2', {
     p_action: action,
+    p_ip_hash: getRateLimitIpHash(request),
   });
   if (error) throw new Error(`Rate limit check failed: ${error.code}`);
   const value = Array.isArray(data) ? data[0] : data;

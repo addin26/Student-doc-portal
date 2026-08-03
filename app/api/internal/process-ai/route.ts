@@ -37,6 +37,11 @@ async function processNextJob(request: NextRequest) {
   if (!isGeminiConfigured()) return NextResponse.json({ error: 'AI is not configured.' }, { status: 503 });
 
   const supabase = createServiceRoleSupabaseClient();
+  const expiry = new Date().toISOString();
+  await Promise.all([
+    supabase.from('api_rate_limit_buckets').delete().lt('expires_at', expiry),
+    supabase.from('api_ip_rate_limit_buckets').delete().lt('expires_at', expiry),
+  ]);
   const workerId = crypto.randomUUID();
   const { data, error } = await supabase.rpc('claim_ai_processing_job', { p_worker_id: workerId });
   if (error) {

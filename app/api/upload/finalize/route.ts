@@ -4,6 +4,7 @@ import { consumeApiRateLimit } from '@/lib/api-rate-limit';
 import { apiError, apiSuccess, getRequestId } from '@/lib/api-response';
 import { deleteR2Object, headR2Object } from '@/lib/cloudflare-r2';
 import { isGeminiConfigured } from '@/lib/gemini';
+import { hasVerifiedEmail, isTrustedMutationOrigin, uploadRequiresVerifiedEmail } from '@/lib/request-security';
 import {
   finalizeUploadSchema,
   getUploadMaxBytes,
@@ -39,10 +40,12 @@ async function cleanOrQueue(auth: AuthenticatedRequest, storageKey: string, reas
 export async function POST(request: NextRequest) {
   const requestId = getRequestId(request.headers.get('x-request-id'));
   try {
+    if (!isTrustedMutationOrigin(request)) return apiError(403, 'UNTRUSTED_ORIGIN', 'The request origin is not allowed.', requestId);
     const auth = await authenticateRequest(request);
     if (!auth) return apiError(401, 'AUTH_REQUIRED', 'Sign in to finalize uploads.', requestId);
     if (auth.accountStatus !== 'active') return apiError(403, 'ACCOUNT_RESTRICTED', 'This account cannot finalize uploads.', requestId);
-    const rateLimit = await consumeApiRateLimit(auth, 'upload.finalize');
+    if (uploadRequiresVerifiedEmail() && !hasVerifiedEmail(auth.user)) return apiError(403, 'EMAIL_VERIFICATION_REQUIRED', 'Verify your email address before finalizing uploads.', requestId);
+    const rateLimit = await consumeApiRateLimit(auth, 'upload.finalize', request);
     if (!rateLimit.allowed) return apiError(429, 'RATE_LIMITED', `Too many finalization requests. Try again in ${rateLimit.retryAfterSeconds} seconds.`, requestId);
 
     const parsed = finalizeUploadSchema.safeParse(await request.json());

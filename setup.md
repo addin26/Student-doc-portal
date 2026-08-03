@@ -25,12 +25,12 @@ and public site URL. R2 and Gemini credentials are server-only.
 - A private Cloudflare R2 bucket and an Object Read & Write S3 credential pair.
 - A production domain or the Vercel project domain.
 - For AI processing: a rotated Gemini key/model, a Supabase service-role key,
-  and a generated cron secret. Leave AI disabled unless all are approved.
+  and a generated cron secret. Account erasure also requires the service-role
+  key and cron secret even when AI is disabled.
 
 Database migration access is separate from application access. Do not add a
-database password or migration token to Vercel. A service-role key is required
-only for the internal AI worker and must remain server-only; omit it when AI is
-disabled.
+database password or migration token to Vercel. The service-role key is used
+only by the internal AI and account-erasure workers and must remain server-only.
 
 ## 3. Import the project into Vercel
 
@@ -74,6 +74,8 @@ data.
 | `CLOUDFLARE_R2_ENDPOINT` | Server only | `https://<account-id>.r2.cloudflarestorage.com` |
 | `CLOUDFLARE_R2_BUCKET_NAME` | Server only | Private bucket name |
 | `UPLOAD_MAX_BYTES` | Server only | Maximum accepted upload size in bytes; initial production value is `104857600` |
+| `REQUIRE_VERIFIED_EMAIL_FOR_UPLOAD` | Server only | Keep `true` to require a Supabase-confirmed email before presign/finalize |
+| `RATE_LIMIT_HASH_SECRET` | Server only, sensitive | Random value of at least 32 characters used to HMAC client IPs before combined account/IP rate limiting |
 
 Do not configure a Cloudflare management API token in the application. It is
 not the same as the R2 S3 Secret Access Key and cannot sign S3 requests.
@@ -82,25 +84,30 @@ not the same as the R2 S3 Secret Access Key and cannot sign S3 requests.
 
 | Variable | Description |
 | --- | --- |
-| `SUPABASE_SERVICE_ROLE_KEY` | Server-only key required only by `/api/internal/process-ai`; never import into client code |
+| `SUPABASE_SERVICE_ROLE_KEY` | Server-only key used only by `/api/internal/process-ai` and `/api/internal/process-erasure`; never import into client code |
 | `GEMINI_API_KEY` | Gemini API key used only by server-side AI processing |
 | `GEMINI_MODEL` | Approved model name after AI processing is enabled |
 | `CRON_SECRET` | Random server-only value of at least 32 characters; Vercel sends it as the cron Bearer credential |
 | `AI_MAX_SOURCE_BYTES` | Maximum PDF bytes the worker reads; initial value `15728640` (15 MiB), hard-capped by code at 25 MiB |
+| `SUPABASE_LEGACY_RESOURCE_BUCKET` | Optional legacy Supabase Storage bucket name used only while erasing pre-R2 private resources; leave empty when no legacy objects remain |
+| `ACCOUNT_ERASURE_ENABLED` | Keep `false` until content-license, legal-hold, recovery, and retention policies are approved; set `true` only through a recorded production change |
 
-AI is enabled only when both Gemini values are present. The worker additionally
-requires the service-role key and cron secret. If any are intentionally absent,
+AI is enabled only when both Gemini values are present. The AI worker additionally
+requires the service-role key and cron secret. If Gemini is intentionally absent,
 uploads and moderation remain usable and PDFs finalize with AI not requested.
+The account-erasure worker still needs the service-role key and cron secret and
+returns a safe disabled response unless `ACCOUNT_ERASURE_ENABLED=true`.
 Do not enter placeholder text as a secret value.
 
 ### Vercel cron plan choice
 
-The checked-in `vercel.json` runs at `02:00 UTC` once daily, which is valid on
-all Vercel plans. Vercel Hobby currently rejects schedules that run more than
-once per day. For a production Pro/Enterprise project, change the schedule to
-`*/5 * * * *` after approving Gemini cost and queue monitoring. Cron invokes
-production deployments only; Preview testing must call the endpoint manually
-with `Authorization: Bearer <CRON_SECRET>`.
+The checked-in `vercel.json` runs AI at `02:00 UTC` and account erasure at
+`03:00 UTC`, once daily each. Vercel Hobby currently rejects any individual
+schedule that runs more than once per day. On Pro/Enterprise, the AI schedule
+may be shortened after approving cost and queue monitoring; keep account
+erasure bounded and monitored. Cron invokes production deployments only;
+Preview testing must call the intended endpoint manually with
+`Authorization: Bearer <CRON_SECRET>`.
 
 ## 5. Supabase configuration
 
@@ -175,6 +182,8 @@ Before enabling uploads, run a staging smoke test:
    npm ci
    npm run typecheck
    npm run lint
+   npm test
+   npm run test:e2e
    npm run build
    ```
 
@@ -201,6 +210,10 @@ use `NEXT_PUBLIC_SITE_URL` for the canonical production origin.
 - [ ] AI absence/failure does not break upload or resource viewing.
 - [ ] An authorized worker call processes one queued PDF; a wrong cron secret returns 401.
 - [ ] Image-only/oversized PDFs fail AI safely and remain valid uploads.
+- [ ] Upload presign/finalize rejects unverified email when the policy is enabled.
+- [ ] Origin checks reject cross-site mutation attempts and account/IP rate limits return 429 safely.
+- [ ] Logical account deletion schedules a 30-day erasure job; reactivation cancels it during the hold.
+- [ ] An authorized erasure worker removes private data and unapproved objects in bounded batches while approved resources become anonymous.
 
 ## 9. Rollback and secret rotation
 

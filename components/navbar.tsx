@@ -110,7 +110,7 @@ export function Navbar() {
               className="rounded-xl"
               asChild
             >
-              <Link href="/explore">
+              <Link href="/explore" aria-label="Search resources">
                 <Search className="h-4.5 w-4.5" />
               </Link>
             </Button>
@@ -120,7 +120,7 @@ export function Navbar() {
               className="rounded-xl"
               asChild
             >
-              <Link href="/dashboard">
+              <Link href="/dashboard" aria-label="Notifications">
                 <Bell className="h-4.5 w-4.5" />
               </Link>
             </Button>

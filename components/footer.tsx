@@ -49,10 +49,15 @@ export function Footer() {
               learn together with students worldwide.
             </p>
             <div className="mt-5 flex gap-2">
-              {[Github, Twitter, Linkedin].map((Icon, i) => (
+              {[
+                { Icon: Github, label: 'StudyDock on GitHub' },
+                { Icon: Twitter, label: 'StudyDock on X' },
+                { Icon: Linkedin, label: 'StudyDock on LinkedIn' },
+              ].map(({ Icon, label }) => (
                 <Link
-                  key={i}
+                  key={label}
                   href="#"
+                  aria-label={label}
                   className="flex h-9 w-9 items-center justify-center rounded-xl border border-border bg-card text-muted-foreground transition-all hover:border-primary/40 hover:text-primary"
                 >
                   <Icon className="h-4 w-4" />

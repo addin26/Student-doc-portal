@@ -3,6 +3,10 @@
     {
       "path": "/api/internal/process-ai",
       "schedule": "0 2 * * *"
+    },
+    {
+      "path": "/api/internal/process-erasure",
+      "schedule": "0 3 * * *"
     }
   ]
 }

@@ -22,7 +22,7 @@ export async function GET(
     if (auth.accountStatus !== 'active') {
       return apiError(403, 'ACCOUNT_RESTRICTED', 'This account cannot download resources.', requestId);
     }
-    const rateLimit = await consumeApiRateLimit(auth, 'resource.download');
+    const rateLimit = await consumeApiRateLimit(auth, 'resource.download', request);
     if (!rateLimit.allowed) {
       return apiError(429, 'RATE_LIMITED', `Too many download requests. Try again in ${rateLimit.retryAfterSeconds} seconds.`, requestId);
     }

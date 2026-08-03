@@ -7,6 +7,7 @@ import {
   isGeminiConfigured,
   summarizeDocumentText,
 } from '@/lib/gemini';
+import { isTrustedMutationOrigin } from '@/lib/request-security';
 
 const requestSchema = z.object({
   documentText: z.string().trim().min(1).max(50000),
@@ -17,6 +18,7 @@ export async function POST(request: NextRequest) {
   const requestId = getRequestId(request.headers.get('x-request-id'));
 
   try {
+    if (!isTrustedMutationOrigin(request)) return apiError(403, 'UNTRUSTED_ORIGIN', 'The request origin is not allowed.', requestId);
     const auth = await authenticateRequest(request);
     if (!auth) {
       return apiError(401, 'AUTH_REQUIRED', 'Sign in to request AI analysis.', requestId);
@@ -24,7 +26,7 @@ export async function POST(request: NextRequest) {
     if (auth.accountStatus !== 'active') {
       return apiError(403, 'ACCOUNT_RESTRICTED', 'This account cannot request AI analysis.', requestId);
     }
-    const rateLimit = await consumeApiRateLimit(auth, 'ai.summarize');
+    const rateLimit = await consumeApiRateLimit(auth, 'ai.summarize', request);
     if (!rateLimit.allowed) {
       return apiError(429, 'RATE_LIMITED', `Too many AI requests. Try again in ${rateLimit.retryAfterSeconds} seconds.`, requestId);
     }

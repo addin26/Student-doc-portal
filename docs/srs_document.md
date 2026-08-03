@@ -2,7 +2,7 @@
 
 | Field | Value |
 | --- | --- |
-| Document version | 3.0 |
+| Document version | 3.1 |
 | Product | STUDYDOCK Public App and STUDYDOCK Admin App |
 | Status | Implementation baseline and target specification |
 | Last updated | August 3, 2026 |
@@ -606,18 +606,19 @@ This table reflects the repository as reviewed on August 3, 2026. It is a planni
 
 | Area | Current state | Required next state |
 | --- | --- | --- |
-| Public UI | Existing visual system is retained; home, explore, detail, university, leaderboard, dashboard, and upload now use live APIs/RPCs | Capture formal desktop/mobile baselines and run browser/accessibility regression tests |
-| Authentication | Registration/login, verification resend, OAuth initiation, recovery/reset, authenticated password change, SSR session refresh, safe return paths, protected pages, and sign-out are implemented | Verify provider/email configuration, abuse controls, session revocation, and deletion workflow in staging |
-| Explore/search | Paginated `search_resources_v2` and live filters/sorts are integrated; fixture resources are not imported by production pages | Apply migration, benchmark representative data, and verify HTTP/page not-found and RLS behavior |
-| Upload | Server validation, user-scoped 15-minute presign, R2 `HEAD`, transactional finalization, idempotency, and orphan cleanup queue are implemented | Verify R2 CORS/write/head/delete and partial failures from a supported staging runtime |
+| Public UI | Existing visual system is retained; home, explore, detail, university, leaderboard, dashboard, and upload use live APIs/RPCs. Desktop/mobile auth baselines and automated auth accessibility checks are committed. | Extend visual/accessibility baselines across the remaining critical public journeys and verify them in CI/staging |
+| Authentication | Registration/login, verification resend, OAuth initiation, recovery/reset, authenticated password change, SSR session refresh, safe return paths, protected pages, sign-out, verified-email upload policy, and logical account states are implemented | Verify provider/email configuration, session revocation, and delayed deletion behavior in staging; final erasure remains policy-disabled by default |
+| Explore/search | Paginated `search_resources_v2`, live filters/sorts, and server-side resource not-found behavior are integrated; fixture resources are not imported by production pages | Apply migration, benchmark representative data, and verify RLS/not-found behavior against staging identities |
+| Upload | Server validation, verified-email enforcement, same-origin mutation checks, combined account/HMAC-IP limits, user-scoped 15-minute presign, R2 `HEAD`, transactional finalization, idempotency, and orphan cleanup are implemented | Verify R2 CORS/write/head/delete, abuse thresholds, and partial failures from a supported staging runtime |
 | AI summary | Authenticated note summaries and a service-role-only asynchronous PDF extraction worker with validation/retries are implemented | Configure a rotated Gemini key/model/service role/cron secret; run malformed/timeout/image-only tests and cost monitoring |
 | Download | Authenticated, visibility-aware, no-store 15-minute R2 download plus authorization-aware counter RPC is implemented | Apply migration and run visitor/user/owner/admin negative tests against real R2 |
 | Study notes | Owner CRUD, visible autosave, delete confirmation, temporary recording disclosure, capability-detected transcription, and authenticated AI summaries are implemented | Run cross-user RLS/browser tests; persistent audio remains deliberately out of scope until retention is approved |
-| Database | Corrective RBAC and lifecycle/search/audit/cleanup/AI migrations are authored | Apply to fresh and upgrade staging databases; resolve any legacy duplicate aborts; execute the full identity/FK/rollback matrix |
-| Admin UI | Admin SSR gate, live dashboard, audited moderation/merge/edit/reject/user-role/state actions, review downloads, permanent R2+DB deletion, cleanup/AI operations, and visible errors are implemented | Apply migrations and execute browser/RPC negative tests plus cleanup failure injection |
+| Database | Corrective RBAC and lifecycle/search/audit/cleanup/AI/rate-limit/delayed-erasure migrations are authored, with static contract assertions in CI | Apply to fresh and upgrade staging databases; resolve legacy duplicate aborts; execute the full identity/FK/rollback matrix |
+| Admin UI | The broken Tailwind entry directives are repaired. SSR gate, live dashboard, server-paginated catalog/moderation lists, audited merge/edit/reject/role/state/deletion actions, review downloads, permanent deletion, and cleanup/AI/erasure operations are implemented. Desktop/mobile login baselines and accessibility checks pass locally. | Apply migrations and execute designated-admin/non-admin browser/RPC tests plus cleanup/erasure failure injection |
 | Admin authorization | Page middleware/server layout and corrected RLS/RPC migration code exist, but the migration is not deployed and the identity matrix is untested | Apply migration in staging and prove page, route, RLS, and RPC rejection for non-admins |
 | Infrastructure access | Public Supabase identifiers exist locally, but no database operator/service-role credential or linked CLI is available. The latest R2 diagnostic fails during TLS negotiation before authentication. No usable Gemini runtime secret is installed. | Rotate all chat/screenshot-exposed credentials, provision migration/service-role access in the correct secret scopes, and repeat R2/Gemini staging diagnostics from Node 20/Vercel |
 | Metrics | Admin dashboard exposes live lifecycle/AI/cleanup counts and recent audit actions | Connect structured logs to production alerting and define latency/backlog/cost thresholds |
+| Automated delivery | Both repositories contain Node 20 CI for lockfile install, lint, typecheck, unit/contract tests, build, audit, and Playwright auth/accessibility/visual checks | Run the new workflows on GitHub and add credential-backed staging journeys and real database policy tests |
 
 ## 13. Risks and open decisions
 

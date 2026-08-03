@@ -4,6 +4,7 @@ import { authenticateRequest } from '@/lib/api-auth';
 import { consumeApiRateLimit } from '@/lib/api-rate-limit';
 import { apiError, apiSuccess, getRequestId } from '@/lib/api-response';
 import { getR2UploadPresignedUrl } from '@/lib/cloudflare-r2';
+import { hasVerifiedEmail, isTrustedMutationOrigin, uploadRequiresVerifiedEmail } from '@/lib/request-security';
 import {
   getUploadMaxBytes,
   isAllowedUploadPair,
@@ -23,10 +24,12 @@ function sanitizeFileName(fileName: string) {
 export async function POST(request: NextRequest) {
   const requestId = getRequestId(request.headers.get('x-request-id'));
   try {
+    if (!isTrustedMutationOrigin(request)) return apiError(403, 'UNTRUSTED_ORIGIN', 'The request origin is not allowed.', requestId);
     const auth = await authenticateRequest(request);
     if (!auth) return apiError(401, 'AUTH_REQUIRED', 'Sign in to upload files.', requestId);
     if (auth.accountStatus !== 'active') return apiError(403, 'ACCOUNT_RESTRICTED', 'This account cannot upload files.', requestId);
-    const rateLimit = await consumeApiRateLimit(auth, 'upload.presign');
+    if (uploadRequiresVerifiedEmail() && !hasVerifiedEmail(auth.user)) return apiError(403, 'EMAIL_VERIFICATION_REQUIRED', 'Verify your email address before uploading.', requestId);
+    const rateLimit = await consumeApiRateLimit(auth, 'upload.presign', request);
     if (!rateLimit.allowed) return apiError(429, 'RATE_LIMITED', `Too many upload requests. Try again in ${rateLimit.retryAfterSeconds} seconds.`, requestId);
 
     const parsed = presignRequestSchema.safeParse(await request.json());

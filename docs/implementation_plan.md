@@ -2,10 +2,10 @@
 
 | Field | Value |
 | --- | --- |
-| Plan version | 3.0 |
+| Plan version | 3.1 |
 | Last updated | August 3, 2026 |
 | Applies to | `STUDYDOCK/`, `STUDYDOCK-ADMIN/`, shared Supabase project |
-| Source of requirements | `srs_document.md` version 3.0 |
+| Source of requirements | `srs_document.md` version 3.1 |
 | Delivery approach | Security-first, incremental, migration-driven |
 
 ## 1. Objective
@@ -33,13 +33,16 @@ Implemented in the current working tree:
 - Registration, sign-in, verification resend, OAuth initiation, recovery/reset, password change, SSR cookie refresh, protected navigation, and sign-out.
 - Server-validated 15-minute R2 presign, object `HEAD`, transactional/idempotent finalization, MIME-extension binding, checksum support, and orphan cleanup tracking.
 - Authenticated download and AI endpoints with database-backed per-account rate limits and stable no-store error contracts.
+- Same-origin mutation checks, verified-email upload enforcement, and combined account plus HMAC-IP rate limits.
 - Asynchronous PDF worker with bounded source size/page count, service-role-only claim/complete/fail RPCs, stale-lock recovery, retries, and validated Gemini output.
 - Truthful private notes: owner CRUD, autosave states, temporary recording disclosure, browser speech-to-text capability handling, and authenticated note summaries.
+- True server-side resource not-found responses and a policy-disabled, bounded delayed account-erasure worker.
+- Node 20 CI plus Playwright auth, accessibility, and desktop/mobile visual-baseline checks.
 
 Remaining release evidence/gaps:
 
 - The new migrations have not been applied because this workstation has no approved Supabase migration/service-role credential.
-- Staging RLS, RPC, upgrade, R2 partial-failure, browser E2E, visual-regression, accessibility, and representative performance tests are still required.
+- Staging RLS, RPC, upgrade, R2 partial-failure, credential-backed E2E, remaining-page visual/accessibility, and representative performance tests are still required. Public auth browser/accessibility/visual checks pass locally.
 - Persistent note audio/OCR remain outside release-one scope pending policy decisions.
 
 ### 2.2 Admin App - `STUDYDOCK-ADMIN/`
@@ -57,20 +60,23 @@ Implemented in the current working tree:
 - Audited university/course edit, approval, dependency-safe rejection, collision-aware merge preflight/execute, search, and bounded lists.
 - Resource moderation, forced-download review, feature/removal actions, permanent R2-plus-database deletion, and retryable cleanup operations.
 - Privacy-safe paginated user search, role/status changes, confirmation, audit references, and last-active-admin protection.
-- Operations page for retrying cleanup and AI jobs; lint/typecheck/test/build scripts pass locally.
+- Typed-confirmation logical account deletion with a 30-day recovery hold, reactivation, and erasure-job visibility.
+- Server-side search/filter/pagination for universities, courses, resources, and users, with bounded server-side merge-target lookup.
+- Operations page for retrying cleanup and AI jobs and inspecting erasure jobs; lint/typecheck/test/build and login browser/accessibility/visual checks pass locally.
+- Repaired invalid Tailwind entry directives that caused the Admin App to render as largely unstyled HTML.
 
 Remaining release evidence/gaps:
 
 - The browser UI calls internally-authorized audited RPCs for several mutations; their defense-in-depth behavior must be proven with non-admin identities after migration deployment.
 - A formal recent-authentication step for the highest-impact production actions is recommended before launch.
-- Pagination is bounded but university/course screens currently cap at 500 client-filtered rows; replace with server pagination before catalogs approach that size.
+- Credential-backed admin/non-admin and destructive-operation browser tests remain pending staging identities and deployed migrations.
 
 ### 2.3 Database
 
 Two additive corrective migrations are now authored:
 
 - `20260803120000_secure_rbac_and_rpc.sql` establishes corrected RBAC/RPC foundations.
-- `20260803130000_resource_lifecycle_and_search_v2.sql` adds normalized catalog ownership, moderation/account/AI state, audit and cleanup jobs, privacy-safe grants, rate limits, transactional finalization, ranked search, merge preflight/execute, admin/user functions, permanent deletion, and service-role AI worker functions.
+- `20260803130000_resource_lifecycle_and_search_v2.sql` adds normalized catalog ownership, moderation/account/AI state, audit/cleanup/delayed-erasure jobs, privacy-safe grants, combined account/IP rate limits, transactional finalization, ranked search, merge preflight/execute, admin/user functions, permanent deletion, and service-role workers.
 
 They remain **authored, not deployed**. Completion requires a fresh-database test and an upgrade test against a staging copy. The migration deliberately aborts on legacy normalized duplicates rather than guessing which records to merge; operators must resolve reported duplicates and rerun.
 
@@ -97,6 +103,7 @@ The original Admin App failure modes have been repaired in code. The table below
 | Failure | Current cause | Recovery phase |
 | --- | --- | --- |
 | Local pages previously could not load live data | Admin `.env.local` was missing; the verified Supabase public configuration has now been added and read-tested | Configuration fixed locally; remove placeholder code fallback in Phase 0 |
+| Admin pages rendered as mostly unstyled HTML | `app/globals.css` used invalid `@tailwindcss` directives, leaving Tailwind utilities uncompiled | Corrected to Tailwind 3 directives and protected by Playwright desktop/mobile snapshots |
 | Administrator sign-in | Implemented email/password sign-in with an SSR cookie session and profile-role check; provider/identity setup is not yet verified end to end | Phase 1 verification |
 | Protected content | Implemented middleware plus a protected server layout that checks `profiles.role` before rendering the Admin shell | Phase 1 verification |
 | University/course/resource writes | Corrective admin RLS policies are authored but not applied to the Supabase project | Apply and verify Phase 1 migration |
@@ -537,7 +544,7 @@ Replace the timer-based simulated summary with the authenticated AI adapter, or 
 
 **Goal:** Deliver usable, audited curation and moderation after backend security is proven.
 
-**Current status:** Workflow code complete/pending deployed authorization verification. Dashboard, proposals, merge, moderation, review download, permanent deletion, cleanup/AI operations, users, roles, and account states are present. Gate P6 still requires non-admin negative tests, R2 failure injection, audit inspection, and confirmation that all migrations are active.
+**Current status:** Workflow code complete/pending deployed authorization verification. Dashboard, proposals, server-paginated lists, merge, moderation, review download, permanent deletion, cleanup/AI/erasure operations, users, roles, account states, and logical deletion/recovery are present. Gate P6 still requires non-admin negative tests, R2/erasure failure injection, audit inspection, and confirmation that all migrations are active.
 
 #### 6.1 Dashboard and navigation
 
@@ -573,7 +580,7 @@ Replace the timer-based simulated summary with the authenticated AI adapter, or 
 
 **Goal:** Verify the platform as one ecosystem and establish safe deployment operations.
 
-**Current status:** Local lint, typecheck, unit tests, production builds, secret-pattern scan, and `npm audit --omit=dev` pass for both repositories with zero reported vulnerabilities. Database/E2E/accessibility/performance/restore tests, production observability, rotated secrets, and launch approval remain open.
+**Current status:** Both repositories now contain Node 20 GitHub CI for lockfile installation, lint, typecheck, unit/static-contract tests, production build, dependency audit, and Playwright. Local auth/login accessibility and desktop/mobile visual checks pass, and the Admin CSS failure is regression-covered. Real database/RLS tests, credential-backed staging journeys, broader accessibility/performance/restore tests, production observability, rotated secrets, and launch approval remain open.
 
 #### 7.1 Automated quality gates
 

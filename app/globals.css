@@ -15,7 +15,7 @@
     --secondary: 244 75% 57%;
     --secondary-foreground: 0 0% 100%;
     --muted: 210 40% 96%;
-    --muted-foreground: 215 16% 47%;
+    --muted-foreground: 215 20% 42%;
     --accent: 189 94% 43%;
     --accent-foreground: 0 0% 100%;
     --destructive: 0 84% 60%;
@@ -117,7 +117,7 @@
     background-size: 16px;
   }
   .form-input {
-    @apply h-11 w-full rounded-xl border border-border bg-background px-4 text-sm outline-none transition-all placeholder:text-muted-foreground/60 focus:border-primary focus:ring-2 focus:ring-primary/20;
+    @apply h-11 w-full rounded-xl border border-border bg-background px-4 text-sm outline-none transition-all placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/20;
   }
   textarea.form-input {
     @apply h-auto py-3;
